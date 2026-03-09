@@ -5,47 +5,83 @@
   <title>Barcode Scanner</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+
+    html, body {
+      width: 100%;
+      height: 100%;
       background: #111;
-      width: 100vw;
-      height: 100vh;
       overflow: hidden;
       font-family: sans-serif;
     }
 
-    /* Live video */
-   #videoEl {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
-  background: #000;
-}
-
-    /* Hidden canvas for ZXing */
-    #snapCanvas { display: none; }
-
-    /* Dim overlay */
-    #dimOverlay {
-      position: absolute;
+    /* ── Start Screen ── */
+    #startScreen {
+      position: fixed;
       top: 0; left: 0;
       width: 100%; height: 100%;
-      background: rgba(0,0,0,0.4);
+      background: #111;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 100;
+    }
+    #startScreen h2 { color: white; font-size: 22px; }
+    #startScreen p  { color: #aaa; font-size: 13px; text-align: center; padding: 0 30px; }
+    #startBtn {
+      background: #00c853;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 14px;
+      padding: 18px 48px;
+      box-shadow: 0 4px 20px rgba(0,200,80,0.5);
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    #startBtn:active { transform: scale(0.97); }
+    #startBtn:disabled { background: #555; box-shadow: none; cursor: not-allowed; }
+
+    /* ── Scanner Screen ── */
+    #scannerScreen {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+
+    #videoEl {
+      position: fixed;
+      top: 0; left: 0;
+      min-width: 100vw;
+      min-height: 100vh;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      background: #000;
+      z-index: 1;
+      display: block;
+    }
+
+    #dimOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.45);
       pointer-events: none;
       z-index: 9;
     }
 
-    /* Scan Reticle Box */
     #scanBox {
-      position: absolute;
+      position: fixed;
       top: 50%; left: 50%;
       width: min(500px, 85vw);
       height: 200px;
       transform: translate(-50%, -50%);
       border: 3px solid rgba(0,255,0,0.85);
       border-radius: 12px;
-      box-shadow: 0 0 15px rgba(0,255,0,0.6);
       animation: pulseBorder 1.5s infinite;
       pointer-events: none;
       z-index: 10;
@@ -56,9 +92,8 @@
       100% { box-shadow: 0 0 10px rgba(0,255,0,0.4); }
     }
 
-    /* Laser line */
     #laserLine {
-      position: absolute;
+      position: fixed;
       left: 50%;
       width: min(494px, 84vw);
       height: 2px;
@@ -74,20 +109,18 @@
       100% { top: calc(50% - 97px); }
     }
 
-    /* Flash overlay */
     #flashOverlay {
-      position: absolute;
+      position: fixed;
       top: 0; left: 0;
-      width: 100%; height: 100%;
+      width: 100vw; height: 100vh;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.15s ease;
       z-index: 20;
     }
 
-    /* Close button */
     #closeScannerBtn {
-      position: absolute;
+      position: fixed;
       top: 20px; right: 20px;
       background: white;
       color: red;
@@ -101,53 +134,72 @@
       z-index: 30;
     }
 
-    /* Instruction label */
     #instructionLabel {
-      position: absolute;
+      position: fixed;
       top: calc(50% - 130px);
       left: 50%;
       transform: translateX(-50%);
-      color: rgba(255,255,255,0.85);
+      color: rgba(255,255,255,0.9);
       font-size: 13px;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.6);
       padding: 5px 14px;
       border-radius: 12px;
       z-index: 30;
       white-space: nowrap;
     }
 
-    /* Status message */
     #statusMsg {
-      position: absolute;
+      position: fixed;
       bottom: 40px;
       left: 50%;
       transform: translateX(-50%);
       color: white;
       font-size: 14px;
-      background: rgba(0,0,0,0.6);
+      background: rgba(0,0,0,0.65);
       padding: 8px 18px;
       border-radius: 20px;
       z-index: 30;
       text-align: center;
       white-space: nowrap;
     }
+
+    /* ── No opener warning ── */
+    #noOpenerMsg {
+      display: none;
+      color: #ffcc00;
+      font-size: 13px;
+      text-align: center;
+      padding: 0 30px;
+      background: rgba(255,200,0,0.1);
+      border: 1px solid rgba(255,200,0,0.3);
+      border-radius: 8px;
+      padding: 10px 20px;
+    }
   </style>
 </head>
 <body>
 
-  <video id="videoEl" playsinline muted webkit-playsinline 
-       style="position:fixed;top:0;left:0;width:100vw;height:100vh;object-fit:cover;background:#000;">
-</video>
-  <canvas id="snapCanvas"></canvas>
+  <!-- ── Start Screen ── -->
+  <div id="startScreen">
+    <h2>📦 Barcode Scanner</h2>
+    <p>Tap the button below to start scanning.</p>
+    <div id="noOpenerMsg">
+      ⚠️ Open this page from your app,<br>not directly in the browser.
+    </div>
+    <button id="startBtn" onclick="loadAndStart()">📷 Start Scanner</button>
+  </div>
 
-  <div id="dimOverlay"></div>
-  <div id="scanBox"></div>
-  <div id="laserLine"></div>
-  <div id="flashOverlay"></div>
-
-  <div id="instructionLabel">📦 Align barcode inside the box</div>
-  <button id="closeScannerBtn" onclick="closeScanner()">✕</button>
-  <div id="statusMsg">Loading scanner...</div>
+  <!-- ── Scanner Screen ── -->
+  <div id="scannerScreen">
+    <video id="videoEl" playsinline muted webkit-playsinline x5-playsinline></video>
+    <div id="dimOverlay"></div>
+    <div id="scanBox"></div>
+    <div id="laserLine"></div>
+    <div id="flashOverlay"></div>
+    <div id="instructionLabel">📦 Align barcode inside the box</div>
+    <button id="closeScannerBtn" onclick="closeScanner()">✕</button>
+    <div id="statusMsg">Loading...</div>
+  </div>
 
   <script>
     let videoStream = null;
@@ -155,23 +207,40 @@
     let scanLocked  = false;
     const beep = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
 
-    // ─── Load ZXing then start ────────────────────────────────────────────────
+    // ─── On load: warn if opened directly (not from app) ─────────────────────
     window.addEventListener("load", () => {
+      if (!window.opener) {
+        document.getElementById("noOpenerMsg").style.display = "block";
+      }
+    });
+
+    // ─── Button click: load ZXing THEN start ─────────────────────────────────
+    function loadAndStart() {
+      const btn = document.getElementById("startBtn");
+      btn.disabled  = true;
+      btn.innerText = "Loading...";
+
+      document.getElementById("startScreen").style.display   = "none";
+      document.getElementById("scannerScreen").style.display = "block";
+      setStatus("Loading scanner library...");
+
       const script   = document.createElement("script");
       script.src     = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js";
       script.onload  = () => startScanner();
-      script.onerror = () => setStatus("❌ Failed to load library.");
+      script.onerror = () => {
+        setStatus("❌ Failed to load library. Check internet connection.");
+        showStartScreenAgain();
+      };
       document.head.appendChild(script);
-    });
+    }
 
-    // ─── Start camera ─────────────────────────────────────────────────────────
+    // ─── Camera start ─────────────────────────────────────────────────────────
     async function startScanner() {
       setStatus("Requesting camera...");
 
-      // Try back camera first, fallback to any camera
       let stream = null;
 
-      // Attempt 1 — back camera with ideal constraints
+      // Attempt 1 — back camera preferred
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -181,46 +250,38 @@
           }
         });
       } catch (e1) {
-        // Attempt 2 — relax constraints, any camera
+        // Attempt 2 — any camera, no constraints
         try {
           stream = await navigator.mediaDevices.getUserMedia({ video: true });
         } catch (e2) {
-          setStatus("❌ Camera error: " + e2.name + " — " + e2.message);
-          console.error(e2);
+          setStatus("❌ " + e2.name + ": " + e2.message);
+          console.error("Camera error:", e2);
+          showStartScreenAgain();
           return;
         }
       }
 
       videoStream = stream;
       const video = document.getElementById("videoEl");
-
-      // ✅ Key fix: set srcObject THEN wait for loadedmetadata THEN play
       video.srcObject = stream;
 
-      await new Promise((resolve, reject) => {
+      // Wait for metadata before playing
+      await new Promise((resolve) => {
         video.onloadedmetadata = () => resolve();
-        video.onerror = (e) => reject(e);
-        // Safety timeout — some devices never fire loadedmetadata
-        setTimeout(resolve, 3000);
+        setTimeout(resolve, 3000); // safety fallback
       });
 
-      try {
-        await video.play();
-      } catch (playErr) {
-        console.warn("play() failed:", playErr);
-      }
+      try { await video.play(); } catch(e) { console.warn("play() error:", e); }
 
-      // ✅ Force repaint — fixes black screen on Android Chrome
+      // Force repaint — fixes black screen on Android Chrome
       video.style.opacity = "0.99";
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          video.style.opacity = "1";
-        });
-      });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        video.style.opacity = "1";
+      }));
 
       setStatus("🟢 Ready — align barcode in the box");
 
-      // ─── Start ZXing decoding ───────────────────────────────────────────────
+      // ─── ZXing decode loop ────────────────────────────────────────────────
       codeReader = new ZXing.BrowserMultiFormatReader();
       codeReader.decodeFromStream(stream, video, (result, err) => {
         if (result && !scanLocked) {
@@ -239,7 +300,7 @@
       flashScreen("limegreen");
       setStatus("✅ Scanned: " + decodedText);
 
-      // ✅ Send result back to main Apps Script page
+      // ✅ Send result back to Apps Script main page
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ barcode: decodedText }, "*");
       }
@@ -247,7 +308,7 @@
       setTimeout(() => stopAndClose(), 700);
     }
 
-    // ─── Flash ────────────────────────────────────────────────────────────────
+    // ─── Helpers ──────────────────────────────────────────────────────────────
     function flashScreen(color) {
       const el = document.getElementById("flashOverlay");
       el.style.background = color;
@@ -255,7 +316,6 @@
       setTimeout(() => { el.style.opacity = "0"; }, 250);
     }
 
-    // ─── Close ────────────────────────────────────────────────────────────────
     function closeScanner() {
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ barcode: null, cancelled: true }, "*");
@@ -263,14 +323,20 @@
       stopAndClose();
     }
 
-    // ─── Stop & close ─────────────────────────────────────────────────────────
     function stopAndClose() {
-      if (codeReader)  { try { codeReader.reset();  } catch(e){} codeReader  = null; }
+      if (codeReader)  { try { codeReader.reset(); } catch(e){} codeReader = null; }
       if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
       window.close();
     }
 
-    // ─── Status ───────────────────────────────────────────────────────────────
+    function showStartScreenAgain() {
+      document.getElementById("scannerScreen").style.display = "none";
+      document.getElementById("startScreen").style.display   = "block";
+      const btn = document.getElementById("startBtn");
+      btn.disabled  = false;
+      btn.innerText = "📷 Start Scanner";
+    }
+
     function setStatus(msg) {
       const el = document.getElementById("statusMsg");
       if (el) el.innerText = msg;
