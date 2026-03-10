@@ -290,13 +290,6 @@
       });
     }
 
-    // ─── Get return URL from query param ─────────────────────────────────────
-    function getReturnUrl() {
-      const params = new URLSearchParams(location.search);
-      const ret    = params.get("return");
-      return ret ? decodeURIComponent(ret) : null;
-    }
-
     // ─── Scan success ─────────────────────────────────────────────────────────
     function onScanSuccess(decodedText) {
       if (scanLocked) return;
@@ -307,35 +300,12 @@
       flashScreen("limegreen");
       setStatus("✅ Scanned: " + decodedText);
 
-      stopCamera();
+      // ✅ Send result back to Apps Script main page
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ barcode: decodedText }, "*");
+      }
 
-      setTimeout(() => {
-        // ✅ Try 1: popup mode — send via postMessage then close
-        if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({ barcode: decodedText }, "*");
-          // also send to opener's parent (Apps Script iframe)
-          try { window.opener.parent.postMessage({ barcode: decodedText }, "*"); } catch(e){}
-          window.close();
-          // ✅ Try 2: if window.close() didn't work after 500ms, navigate back
-          setTimeout(() => {
-            const returnUrl = getReturnUrl();
-            if (returnUrl) {
-              const sep = returnUrl.includes("?") ? "&" : "?";
-              window.location.href = returnUrl + sep + "scanned=" + encodeURIComponent(decodedText);
-            }
-          }, 500);
-        } else {
-          // ✅ Try 3: new tab mode — navigate back via URL param
-          const returnUrl = getReturnUrl();
-          if (returnUrl) {
-            const sep = returnUrl.includes("?") ? "&" : "?";
-            window.location.href = returnUrl + sep + "scanned=" + encodeURIComponent(decodedText);
-          } else {
-            setStatus("✅ Barcode: " + decodedText);
-            showStartScreenAgain();
-          }
-        }
-      }, 700);
+      setTimeout(() => stopAndClose(), 700);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -347,21 +317,16 @@
     }
 
     function closeScanner() {
-      stopCamera();
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ barcode: null, cancelled: true }, "*");
-        window.close();
-      } else {
-        const returnUrl = getReturnUrl();
-        if (returnUrl) window.location.href = returnUrl;
-        else showStartScreenAgain();
       }
+      stopAndClose();
     }
 
-    // ─── Stop camera ──────────────────────────────────────────────────────────
-    function stopCamera() {
-      if (codeReader)  { try { codeReader.reset();  } catch(e){} codeReader  = null; }
+    function stopAndClose() {
+      if (codeReader)  { try { codeReader.reset(); } catch(e){} codeReader = null; }
       if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+      window.close();
     }
 
     function showStartScreenAgain() {
@@ -372,352 +337,6 @@
       btn.innerText = "📷 Start Scanner";
     }
 
-    function setStatus(msg) {
-      const el = document.getElementById("statusMsg");
-      if (el) el.innerText = msg;
-    }
-  </script>
-
-</body>
-</html>
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Barcode Scanner</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    html, body {
-      width: 100%;
-      height: 100%;
-      background: #111;
-      overflow: hidden;
-      font-family: sans-serif;
-    }
-
-    /* ── Start Screen ── */
-    #startScreen {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: #111;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      z-index: 100;
-    }
-    #startScreen h2 { color: white; font-size: 22px; }
-    #startScreen p  { color: #aaa; font-size: 13px; text-align: center; padding: 0 30px; }
-
-    #startBtn {
-      background: #00c853;
-      color: white;
-      font-size: 18px;
-      font-weight: bold;
-      border: none;
-      border-radius: 14px;
-      padding: 18px 48px;
-      box-shadow: 0 4px 20px rgba(0,200,80,0.5);
-      cursor: pointer;
-      margin-top: 10px;
-    }
-    #startBtn:active   { transform: scale(0.97); }
-    #startBtn:disabled { background: #555; box-shadow: none; cursor: not-allowed; }
-
-    /* ── Scanner Screen ── */
-    #scannerScreen {
-      display: none;
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-    }
-
-    #videoEl {
-      position: fixed;
-      top: 0; left: 0;
-      min-width: 100vw;
-      min-height: 100vh;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-      background: #000;
-      z-index: 1;
-      display: block;
-    }
-
-    #dimOverlay {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.45);
-      pointer-events: none;
-      z-index: 9;
-    }
-
-    #scanBox {
-      position: fixed;
-      top: 50%; left: 50%;
-      width: min(500px, 85vw);
-      height: 200px;
-      transform: translate(-50%, -50%);
-      border: 3px solid rgba(0,255,0,0.85);
-      border-radius: 12px;
-      animation: pulseBorder 1.5s infinite;
-      pointer-events: none;
-      z-index: 10;
-    }
-    @keyframes pulseBorder {
-      0%   { box-shadow: 0 0 10px rgba(0,255,0,0.4); }
-      50%  { box-shadow: 0 0 28px rgba(0,255,0,1); }
-      100% { box-shadow: 0 0 10px rgba(0,255,0,0.4); }
-    }
-
-    #laserLine {
-      position: fixed;
-      left: 50%;
-      width: min(494px, 84vw);
-      height: 2px;
-      background: linear-gradient(to right, transparent, red, transparent);
-      transform: translateX(-50%);
-      animation: scanLaser 2s ease-in-out infinite;
-      pointer-events: none;
-      z-index: 11;
-    }
-    @keyframes scanLaser {
-      0%   { top: calc(50% - 97px); }
-      50%  { top: calc(50% + 97px); }
-      100% { top: calc(50% - 97px); }
-    }
-
-    #flashOverlay {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.15s ease;
-      z-index: 20;
-    }
-
-    #closeScannerBtn {
-      position: fixed;
-      top: 20px; right: 20px;
-      background: white;
-      color: red;
-      font-weight: bold;
-      border: none;
-      border-radius: 50%;
-      width: 52px; height: 52px;
-      font-size: 22px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-      cursor: pointer;
-      z-index: 30;
-    }
-
-    #instructionLabel {
-      position: fixed;
-      top: calc(50% - 130px);
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255,255,255,0.9);
-      font-size: 13px;
-      background: rgba(0,0,0,0.6);
-      padding: 5px 14px;
-      border-radius: 12px;
-      z-index: 30;
-      white-space: nowrap;
-    }
-
-    #statusMsg {
-      position: fixed;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: white;
-      font-size: 14px;
-      background: rgba(0,0,0,0.65);
-      padding: 8px 18px;
-      border-radius: 20px;
-      z-index: 30;
-      text-align: center;
-      white-space: nowrap;
-    }
-  </style>
-</head>
-<body>
-
-  <!-- ── Start Screen ── -->
-  <div id="startScreen">
-    <h2>📦 Barcode Scanner</h2>
-    <p>Tap the button below to start scanning.</p>
-    <button id="startBtn" onclick="loadAndStart()">📷 Start Scanner</button>
-  </div>
-
-  <!-- ── Scanner Screen ── -->
-  <div id="scannerScreen">
-    <video id="videoEl" playsinline muted webkit-playsinline x5-playsinline></video>
-    <div id="dimOverlay"></div>
-    <div id="scanBox"></div>
-    <div id="laserLine"></div>
-    <div id="flashOverlay"></div>
-    <div id="instructionLabel">📦 Align barcode inside the box</div>
-    <button id="closeScannerBtn" onclick="closeScanner()">✕</button>
-    <div id="statusMsg">Loading...</div>
-  </div>
-
-  <script>
-    let videoStream = null;
-    let codeReader  = null;
-    let scanLocked  = false;
-    const beep = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-
-    // ─── Get return URL from query param ─────────────────────────────────────
-    function getReturnUrl() {
-      const params = new URLSearchParams(location.search);
-      const ret    = params.get("return");
-      return ret ? decodeURIComponent(ret) : null;
-    }
-
-    // ─── Button click: load ZXing then start ─────────────────────────────────
-    function loadAndStart() {
-      const btn     = document.getElementById("startBtn");
-      btn.disabled  = true;
-      btn.innerText = "Loading...";
-
-      document.getElementById("startScreen").style.display   = "none";
-      document.getElementById("scannerScreen").style.display = "block";
-      setStatus("Loading scanner library...");
-
-      const script   = document.createElement("script");
-      script.src     = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js";
-      script.onload  = () => startScanner();
-      script.onerror = () => {
-        setStatus("❌ Failed to load library. Check internet connection.");
-        showStartScreenAgain();
-      };
-      document.head.appendChild(script);
-    }
-
-    // ─── Start camera ─────────────────────────────────────────────────────────
-    async function startScanner() {
-      setStatus("Requesting camera...");
-
-      let stream = null;
-
-      // Attempt 1 — back camera preferred
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width:  { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-      } catch (e1) {
-        // Attempt 2 — any camera
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        } catch (e2) {
-          setStatus("❌ " + e2.name + ": " + e2.message);
-          showStartScreenAgain();
-          return;
-        }
-      }
-
-      videoStream = stream;
-      const video = document.getElementById("videoEl");
-      video.srcObject = stream;
-
-      await new Promise((resolve) => {
-        video.onloadedmetadata = () => resolve();
-        setTimeout(resolve, 3000);
-      });
-
-      try { await video.play(); } catch(e) { console.warn("play() error:", e); }
-
-      // Force repaint — fixes black screen on Android Chrome
-      video.style.opacity = "0.99";
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        video.style.opacity = "1";
-      }));
-
-      setStatus("🟢 Ready — align barcode in the box");
-
-      codeReader = new ZXing.BrowserMultiFormatReader();
-      codeReader.decodeFromStream(stream, video, (result, err) => {
-        if (result && !scanLocked) {
-          onScanSuccess(result.getText());
-        }
-      });
-    }
-
-    // ─── Scan success ─────────────────────────────────────────────────────────
-    function onScanSuccess(decodedText) {
-      if (scanLocked) return;
-      scanLocked = true;
-
-      beep.play().catch(() => {});
-      if (navigator.vibrate) navigator.vibrate(150);
-      flashScreen("limegreen");
-      setStatus("✅ Scanned: " + decodedText);
-
-      // Stop camera immediately
-      stopCamera();
-
-      // ✅ Navigate THIS tab back to main page with barcode in URL
-      setTimeout(() => {
-        const returnUrl = getReturnUrl();
-        if (returnUrl) {
-          const separator = returnUrl.includes("?") ? "&" : "?";
-          window.location.href = returnUrl + separator + "scanned=" + encodeURIComponent(decodedText);
-        } else {
-          // No return URL — just show result (opened directly)
-          setStatus("✅ Barcode: " + decodedText);
-          showStartScreenAgain();
-        }
-      }, 700);
-    }
-
-    // ─── Close button — go back without barcode ───────────────────────────────
-    function closeScanner() {
-      stopCamera();
-      const returnUrl = getReturnUrl();
-      if (returnUrl) {
-        window.location.href = returnUrl;
-      } else {
-        showStartScreenAgain();
-      }
-    }
-
-    // ─── Stop camera tracks ───────────────────────────────────────────────────
-    function stopCamera() {
-      if (codeReader)  { try { codeReader.reset();  } catch(e){} codeReader  = null; }
-      if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
-    }
-
-    // ─── Flash ────────────────────────────────────────────────────────────────
-    function flashScreen(color) {
-      const el = document.getElementById("flashOverlay");
-      el.style.background = color;
-      el.style.opacity    = "0.5";
-      setTimeout(() => { el.style.opacity = "0"; }, 250);
-    }
-
-    // ─── Show start screen again ──────────────────────────────────────────────
-    function showStartScreenAgain() {
-      stopCamera();
-      scanLocked = false;
-      document.getElementById("scannerScreen").style.display = "none";
-      document.getElementById("startScreen").style.display   = "block";
-      const btn     = document.getElementById("startBtn");
-      btn.disabled  = false;
-      btn.innerText = "📷 Start Scanner";
-    }
-
-    // ─── Status ───────────────────────────────────────────────────────────────
     function setStatus(msg) {
       const el = document.getElementById("statusMsg");
       if (el) el.innerText = msg;
