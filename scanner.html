@@ -29,7 +29,6 @@
     }
     #startScreen h2 { color: white; font-size: 22px; }
     #startScreen p  { color: #aaa; font-size: 13px; text-align: center; padding: 0 30px; }
-
     #startBtn {
       background: #00c853;
       color: white;
@@ -42,7 +41,7 @@
       cursor: pointer;
       margin-top: 10px;
     }
-    #startBtn:active  { transform: scale(0.97); }
+    #startBtn:active { transform: scale(0.97); }
     #startBtn:disabled { background: #555; box-shadow: none; cursor: not-allowed; }
 
     /* ── Scanner Screen ── */
@@ -163,6 +162,19 @@
       text-align: center;
       white-space: nowrap;
     }
+
+    /* ── No opener warning ── */
+    #noOpenerMsg {
+      display: none;
+      color: #ffcc00;
+      font-size: 13px;
+      text-align: center;
+      padding: 0 30px;
+      background: rgba(255,200,0,0.1);
+      border: 1px solid rgba(255,200,0,0.3);
+      border-radius: 8px;
+      padding: 10px 20px;
+    }
   </style>
 </head>
 <body>
@@ -171,6 +183,9 @@
   <div id="startScreen">
     <h2>📦 Barcode Scanner</h2>
     <p>Tap the button below to start scanning.</p>
+    <div id="noOpenerMsg">
+      ⚠️ Open this page from your app,<br>not directly in the browser.
+    </div>
     <button id="startBtn" onclick="loadAndStart()">📷 Start Scanner</button>
   </div>
 
@@ -192,9 +207,16 @@
     let scanLocked  = false;
     const beep = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
 
-    // ─── Button click: load ZXing then start ──────────────────────────────────
+    // ─── On load: warn if opened directly (not from app) ─────────────────────
+    window.addEventListener("load", () => {
+      if (!window.opener) {
+        document.getElementById("noOpenerMsg").style.display = "block";
+      }
+    });
+
+    // ─── Button click: load ZXing THEN start ─────────────────────────────────
     function loadAndStart() {
-      const btn    = document.getElementById("startBtn");
+      const btn = document.getElementById("startBtn");
       btn.disabled  = true;
       btn.innerText = "Loading...";
 
@@ -212,7 +234,7 @@
       document.head.appendChild(script);
     }
 
-    // ─── Start camera ─────────────────────────────────────────────────────────
+    // ─── Camera start ─────────────────────────────────────────────────────────
     async function startScanner() {
       setStatus("Requesting camera...");
 
@@ -278,41 +300,15 @@
       flashScreen("limegreen");
       setStatus("✅ Scanned: " + decodedText);
 
-      // Stop camera
-      if (codeReader)  { try { codeReader.reset();  } catch(e){} codeReader  = null; }
-      if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
-
-      // ✅ Navigate back to main page with barcode as URL parameter
-      setTimeout(() => {
-        const returnUrl = sessionStorage.getItem("returnUrl");
-        sessionStorage.removeItem("returnUrl");
-
-        if (returnUrl) {
-          const separator = returnUrl.includes("?") ? "&" : "?";
-          window.location.href = returnUrl + separator + "scanned=" + encodeURIComponent(decodedText);
-        } else {
-          // Fallback — go back in history
-          history.back();
-        }
-      }, 700);
-    }
-
-    // ─── Close button — go back without scanning ──────────────────────────────
-    function closeScanner() {
-      if (codeReader)  { try { codeReader.reset();  } catch(e){} codeReader  = null; }
-      if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
-
-      const returnUrl = sessionStorage.getItem("returnUrl");
-      sessionStorage.removeItem("returnUrl");
-
-      if (returnUrl) {
-        window.location.href = returnUrl; // go back without barcode
-      } else {
-        history.back();
+      // ✅ Send result back to Apps Script main page
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ barcode: decodedText }, "*");
       }
+
+      setTimeout(() => stopAndClose(), 700);
     }
 
-    // ─── Flash ────────────────────────────────────────────────────────────────
+    // ─── Helpers ──────────────────────────────────────────────────────────────
     function flashScreen(color) {
       const el = document.getElementById("flashOverlay");
       el.style.background = color;
@@ -320,16 +316,27 @@
       setTimeout(() => { el.style.opacity = "0"; }, 250);
     }
 
-    // ─── Show start screen again on error ────────────────────────────────────
+    function closeScanner() {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ barcode: null, cancelled: true }, "*");
+      }
+      stopAndClose();
+    }
+
+    function stopAndClose() {
+      if (codeReader)  { try { codeReader.reset(); } catch(e){} codeReader = null; }
+      if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+      window.close();
+    }
+
     function showStartScreenAgain() {
       document.getElementById("scannerScreen").style.display = "none";
       document.getElementById("startScreen").style.display   = "block";
-      const btn     = document.getElementById("startBtn");
+      const btn = document.getElementById("startBtn");
       btn.disabled  = false;
       btn.innerText = "📷 Start Scanner";
     }
 
-    // ─── Status ───────────────────────────────────────────────────────────────
     function setStatus(msg) {
       const el = document.getElementById("statusMsg");
       if (el) el.innerText = msg;
