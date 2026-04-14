@@ -361,7 +361,7 @@ t += index + line1Name + qty + rate + tot + '\n';
     
    const totalText = 'Total: Rs.' + total;
     t += LINE;
-    t += totalText.padStart(LINE_WIDTH) + '\n';
+    t += totalText.padStart(32) + '\n';
     t += LINE + CENTER + 'Thank You! Visit Again' + LF;
     t += LF + LF + LF + CUT;
     return new TextEncoder().encode(t);
