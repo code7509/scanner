@@ -6,36 +6,56 @@
   <style>
     body { font-family: sans-serif; display:flex; align-items:center;
            justify-content:center; height:100vh; margin:0; background:#f0f4f8; }
-    .box { text-align:center; background:white; padding:30px; border-radius:12px;
-           box-shadow:0 2px 12px rgba(0,0,0,0.1); }
+    .box { text-align:center; background:white; padding:30px 40px;
+           border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
     p { color:#64748b; margin-top:8px; font-size:14px; }
   </style>
 </head>
 <body>
   <div class="box">
-    <div style="font-size:32px">🖨️</div>
-    <b>Sending to printer...</b>
+    <div style="font-size:36px">🖨️</div>
+    <b id="title">Sending to printer...</b>
     <p id="msg">Please wait</p>
   </div>
-
 <script>
-  const STORAGE_KEY = 'jalaram_print_job';
   const PRINTER_URL = 'https://code7509.github.io/scanner/';
+  const STORAGE_KEY = 'jalaram_print_job';
 
   try {
     const raw = new URLSearchParams(window.location.search).get('data');
-    if (!raw) throw new Error('No data');
+    if (!raw) throw new Error('No data in URL');
 
-    // Write job to localStorage (printer tab is listening!)
+    // ── Method 1: Write to localStorage (printer tab polling will catch it) ──
     localStorage.setItem(STORAGE_KEY, raw);
 
-    document.getElementById('msg').textContent = 'Job sent! This tab will close.';
+    // ── Method 2: Open printer tab with target name & postMessage ────────────
+    // window.open with same target name 'jalaram_printer' will FOCUS existing
+    // tab instead of opening a new one on Android Chrome
+    const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
 
-    // Close this relay tab after 1 second
-    setTimeout(() => window.close(), 1000);
+    if (printerTab) {
+      // Wait for printer tab to be ready then postMessage
+      let attempts = 0;
+      const send = setInterval(() => {
+        attempts++;
+        try {
+          printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
+        } catch(e) {}
+        if (attempts >= 5) clearInterval(send);
+      }, 300);
+    }
+
+    document.getElementById('title').textContent = '✅ Sent!';
+    document.getElementById('msg').textContent = 'Printing now...';
+
+    setTimeout(() => {
+      try { window.close(); } catch(e) {}
+      document.getElementById('msg').textContent = 'You can close this tab.';
+    }, 1500);
 
   } catch(e) {
-    document.getElementById('msg').textContent = 'Error: ' + e.message;
+    document.getElementById('title').textContent = '❌ Error';
+    document.getElementById('msg').textContent = e.message;
   }
 </script>
 </body>
