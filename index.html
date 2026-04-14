@@ -318,16 +318,16 @@ function centerText(text, width) {
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
     const colIndexWidth = 2;
-    const colItemWidth  = 13;
+    const colItemWidth  = 14;
     const colQtyWidth   = 4;
-    const colRateWidth  = 5;
+    const colRateWidth  = 6;
     const colTotalWidth = 6;
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
-    const hQty   = 'Qty'.padStart(colQtyWidth);
-    const hRate  = 'Rate'.padStart(colRateWidth);
-    const hTotal = 'Total'.padStart(colTotalWidth);
-        
+    const hQty   = centerText('Qty', colQtyWidth);
+    const hRate  = centerText('Rate', colRateWidth);
+    const hTotal = centerText('Total', colTotalWidth);
+    
     t += hIndex + hItem + hQty + hRate + hTotal + '\n';
     
 items.forEach((item, i) => {
@@ -358,8 +358,10 @@ t += index + line1Name + qty + rate + tot + '\n';
     t += `   ${line2Name}\n`; // indent for alignment
   }
 });
-
-    t += LINE + RIGHT + BON + 'Total: Rs.' + total + '   ' + BOFF + LF;
+    
+   const totalText = 'Total: Rs.' + total;
+    t += LINE;
+    t += totalText.padStart(LINE_WIDTH) + '\n';
     t += LINE + CENTER + 'Thank You! Visit Again' + LF;
     t += LF + LF + LF + CUT;
     return new TextEncoder().encode(t);
