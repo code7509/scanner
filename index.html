@@ -76,17 +76,13 @@
     #receiptPreview table { width: 100%; border-collapse: collapse; }
     #receiptPreview td, #receiptPreview th { padding: 2px 3px; }
     .hint { font-size:12px; color:#94a3b8; text-align:center; margin-top:10px; }
-
-    /* Flash overlay when new job arrives */
     #jobFlash {
       display: none;
       position: fixed;
       inset: 0;
       background: rgba(22,163,74,0.15);
       pointer-events: none;
-      animation: flashFade 1s ease forwards;
     }
-    @keyframes flashFade { 0%{opacity:1} 100%{opacity:0} }
   </style>
 </head>
 <body>
@@ -104,11 +100,12 @@
   <p class="hint">⚠️ Keep this tab open while billing</p>
 
 <script>
-  let printChar    = null;
-  let savedDevice  = null;
-  let pendingJob   = null;
-  const STORAGE_KEY = 'jalaram_print_job';
+  let printChar   = null;
+  let savedDevice = null;
+  let pendingJob  = null;
+  let lastJobId   = null; // prevent duplicate prints
 
+  const STORAGE_KEY = 'jalaram_print_job';
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
     { service:'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic:'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f' },
@@ -122,69 +119,74 @@
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
 
-  // ── Flash effect when job arrives ────────────────────────────────────────────
-  function flashScreen() {
+  function flash() {
     const f = document.getElementById('jobFlash');
     f.style.display = 'block';
-    f.style.animation = 'none';
-    requestAnimationFrame(() => {
-      f.style.animation = 'flashFade 1s ease forwards';
-      setTimeout(() => f.style.display = 'none', 1000);
-    });
+    f.style.opacity = '1';
+    f.style.transition = 'opacity 1s';
+    setTimeout(() => { f.style.opacity = '0'; }, 100);
+    setTimeout(() => { f.style.display = 'none'; }, 1100);
   }
 
-  // ── Handle incoming print job ────────────────────────────────────────────────
-  async function handlePrintJob(raw) {
-    try {
-      const job = JSON.parse(raw);
-      flashScreen();
-      renderPreview(job);
-      localStorage.removeItem(STORAGE_KEY); // clear so next job triggers event
+  // ── Deduplicated job handler ─────────────────────────────────────────────────
+  async function handlePrintJob(job) {
+    // Use billNo + date as unique job ID to prevent double prints
+    const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
+    if (jobId === lastJobId) return; // already handled
+    lastJobId = jobId;
 
-      if (printChar) {
-        await printJob(job);
-      } else {
-        pendingJob = job;
-        setStatus('📋 Bill received! Connect printer to print.', 'idle');
-      }
-    } catch(e) {
-      setStatus('❌ Bad job data: ' + e.message, 'error');
+    flash();
+    renderPreview(job);
+    localStorage.removeItem(STORAGE_KEY);
+
+    if (printChar) {
+      await printJob(job);
+    } else {
+      pendingJob = job;
+      setStatus('📋 Bill received! Connect printer to print.', 'idle');
     }
   }
 
-  // ── localStorage listener (fires when relay.html writes on same origin) ──────
-  window.addEventListener('storage', (e) => {
-    if (e.key === STORAGE_KEY && e.newValue) {
-      handlePrintJob(e.newValue);
+  // ── Method 1: postMessage from relay.html ────────────────────────────────────
+  window.addEventListener('message', async (e) => {
+    if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
+      await handlePrintJob(e.data.payload);
     }
   });
 
-  // ── Polling fallback (every 1s) in case storage event is missed ──────────────
-  // Some mobile browsers don't always fire the storage event reliably
-  setInterval(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) handlePrintJob(raw);
-  }, 1000);
+  // ── Method 2: localStorage storage event ────────────────────────────────────
+  window.addEventListener('storage', async (e) => {
+    if (e.key === STORAGE_KEY && e.newValue) {
+      try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
+    }
+  });
 
-  // ── On load ──────────────────────────────────────────────────────────────────
+  // ── Method 3: Polling every 800ms (most reliable on Android) ────────────────
+  setInterval(async () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
+  }, 800);
+
+  // ── On page load ─────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
-    // Check URL for data (when opened directly from Apps Script)
     const raw = new URLSearchParams(window.location.search).get('data');
     if (raw) {
-      pendingJob = JSON.parse(decodeURIComponent(raw));
-      renderPreview(pendingJob);
-      history.replaceState(null, '', window.location.pathname);
-      setStatus('Connect printer to print this bill.', 'idle');
+      try {
+        pendingJob = JSON.parse(decodeURIComponent(raw));
+        renderPreview(pendingJob);
+        history.replaceState(null, '', window.location.pathname);
+      } catch(e) {}
     }
-
-    // Clear any stale job in localStorage on fresh load
+    // Clear stale job
     localStorage.removeItem(STORAGE_KEY);
+    lastJobId = null;
   });
 
-  // ── Connect Bluetooth ────────────────────────────────────────────────────────
+  // ── Connect Bluetooth ─────────────────────────────────────────────────────────
   async function connectPrinter() {
     try {
-      setStatus('Scanning for printer...', 'loading', true);
+      setStatus('Scanning...', 'loading', true);
       document.getElementById('connectBtn').disabled = true;
 
       const device = await navigator.bluetooth.requestDevice({
@@ -201,11 +203,7 @@
         setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('forgetBtn').style.display = 'block';
-
-        if (pendingJob) {
-          await printJob(pendingJob);
-          pendingJob = null;
-        }
+        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
       } else {
         setStatus('❌ UUID not matched. Try again.', 'error');
         document.getElementById('connectBtn').disabled = false;
@@ -230,7 +228,6 @@
     return false;
   }
 
-  // ── Auto reconnect on disconnect ─────────────────────────────────────────────
   async function onDisconnected() {
     printChar = null;
     setStatus('Disconnected. Reconnecting...', 'loading', true);
@@ -247,7 +244,6 @@
     document.getElementById('connectBtn').disabled = false;
   }
 
-  // ── Forget ───────────────────────────────────────────────────────────────────
   function forgetPrinter() {
     if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
     printChar = savedDevice = null;
@@ -255,9 +251,9 @@
     setStatus('Forgotten. Connect again.', 'idle');
   }
 
-  // ── Render preview ───────────────────────────────────────────────────────────
+  // ── Render preview ────────────────────────────────────────────────────────────
   function renderPreview(data) {
-    if (!data || !data.header || !data.items) return;
+    if (!data?.header || !data?.items) return;
     const { header, items } = data;
     let total = 0, rows = '';
     items.forEach((item, i) => {
@@ -286,7 +282,7 @@
       <div style="text-align:center">Thank You Visit Again</div>`;
   }
 
-  // ── Print ────────────────────────────────────────────────────────────────────
+  // ── Print ─────────────────────────────────────────────────────────────────────
   async function printJob(data) {
     if (!printChar) return;
     setStatus('Printing...', 'loading', true);
