@@ -310,7 +310,7 @@
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
     const colIndexWidth = 2;
-    const colItemWidth  = 10;
+    const colItemWidth  = 12;
     const colQtyWidth   = 3;
     const colRateWidth  = 5;
     const colTotalWidth = 6;
@@ -320,7 +320,7 @@
     const hRate  = 'Rate'.padStart(colRateWidth);
     const hTotal = 'Total'.padStart(colTotalWidth);
     
-    t += hIndex + hItem + hQty + ' ' + hRate + ' ' + hTotal + '\n' + LINE;
+    t += hIndex + hItem + hQty + hRate + hTotal + '\n';
     
 items.forEach((item, i) => {
   const it = item.qty * item.price;
@@ -343,7 +343,7 @@ const qtyStr   = String(item.qty).padStart(colQtyWidth);
 const rateStr  = String(item.price).padStart(colRateWidth);
 const totStr   = String(it).padStart(colTotalWidth);
 
-t += index + name + qtyStr + ' ' + rateStr + ' ' + totStr + '\n';
+t += index + name + qty + rate + tot + '\n';
 
   // Second line (only if extra name exists)
   if (line2Name) {
