@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Jalaram Printer</title>
+  <title>Jalaram Printer 🖨️</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -15,25 +15,16 @@
       padding: 20px;
       min-height: 100vh;
     }
-
-    /* When inside iframe, make it compact */
-    body.iframe-mode {
-      padding: 10px;
-      background: transparent;
-    }
-
-    h2 { color: #333; margin-bottom: 12px; font-size: 16px; }
-
+    h2 { color: #333; margin-bottom: 12px; font-size: 17px; }
     .card {
       background: white;
       border-radius: 12px;
       padding: 16px;
       width: 100%;
-      max-width: 400px;
+      max-width: 380px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.1);
       margin-bottom: 12px;
     }
-
     .status-box {
       padding: 10px 14px;
       border-radius: 8px;
@@ -46,7 +37,6 @@
     .status-box.success { background: #dcfce7; color: #16a34a; }
     .status-box.error   { background: #fee2e2; color: #dc2626; }
     .status-box.loading { background: #dbeafe; color: #2563eb; }
-
     button {
       width: 100%;
       padding: 11px;
@@ -60,9 +50,7 @@
     }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     #connectBtn { background: #2563eb; color: white; }
-    #printBtn   { background: #16a34a; color: white; }
-    #forgetBtn  { background: #e2e8f0; color: #475569; font-size: 12px; padding: 7px; }
-
+    #forgetBtn  { background: #e2e8f0; color: #475569; font-size:12px; padding:7px; display:none; }
     .spinner {
       display: inline-block;
       width: 11px; height: 11px;
@@ -74,7 +62,6 @@
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-
     #receiptPreview {
       font-family: 'Courier New', monospace;
       font-size: 11px;
@@ -84,34 +71,43 @@
       border: 1px dashed #ccc;
       border-radius: 8px;
       width: 100%;
-      max-width: 400px;
+      max-width: 380px;
     }
     #receiptPreview table { width: 100%; border-collapse: collapse; }
     #receiptPreview td, #receiptPreview th { padding: 2px 3px; }
+    .hint { font-size:12px; color:#94a3b8; text-align:center; margin-top:10px; }
 
-    /* Hide receipt in iframe mode to save space */
-    body.iframe-mode #receiptPreview { display: none; }
-    body.iframe-mode h2 { display: none; }
+    /* Flash overlay when new job arrives */
+    #jobFlash {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(22,163,74,0.15);
+      pointer-events: none;
+      animation: flashFade 1s ease forwards;
+    }
+    @keyframes flashFade { 0%{opacity:1} 100%{opacity:0} }
   </style>
 </head>
 <body>
 
-  <h2>🖨️ Jalaram Printer</h2>
+  <div id="jobFlash"></div>
+  <h2>🖨️ Jalaram Super Store — Printer</h2>
 
   <div class="card">
     <div id="statusBox" class="status-box idle">Not connected</div>
     <button id="connectBtn" onclick="connectPrinter()">🔗 Connect Bluetooth Printer</button>
-    <button id="printBtn" onclick="printCurrentReceipt()" disabled>🖨️ Print</button>
-    <button id="forgetBtn" onclick="forgetPrinter()" style="display:none">🗑️ Forget Printer</button>
+    <button id="forgetBtn" onclick="forgetPrinter()">🗑️ Forget & Disconnect</button>
   </div>
 
-  <div id="receiptPreview">Waiting for receipt...</div>
+  <div id="receiptPreview">Waiting for receipt from billing app...</div>
+  <p class="hint">⚠️ Keep this tab open while billing</p>
 
 <script>
   let printChar    = null;
   let savedDevice  = null;
-  let receiptData  = null;
-  let pendingPrint = false; // queue print if data arrives before connect
+  let pendingJob   = null;
+  const STORAGE_KEY = 'jalaram_print_job';
 
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -119,67 +115,76 @@
     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
   ];
 
-  // ── Detect if running inside iframe ─────────────────────────────────────────
-  const isIframe = window.self !== window.top;
-  if (isIframe) document.body.classList.add('iframe-mode');
-
   // ── Status ───────────────────────────────────────────────────────────────────
   function setStatus(msg, type='idle', spinner=false) {
     const b = document.getElementById('statusBox');
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
-    // Also notify parent (Apps Script) of status
-    if (isIframe) {
-      window.parent.postMessage({ type: 'PRINTER_STATUS', status: type, msg }, '*');
+  }
+
+  // ── Flash effect when job arrives ────────────────────────────────────────────
+  function flashScreen() {
+    const f = document.getElementById('jobFlash');
+    f.style.display = 'block';
+    f.style.animation = 'none';
+    requestAnimationFrame(() => {
+      f.style.animation = 'flashFade 1s ease forwards';
+      setTimeout(() => f.style.display = 'none', 1000);
+    });
+  }
+
+  // ── Handle incoming print job ────────────────────────────────────────────────
+  async function handlePrintJob(raw) {
+    try {
+      const job = JSON.parse(raw);
+      flashScreen();
+      renderPreview(job);
+      localStorage.removeItem(STORAGE_KEY); // clear so next job triggers event
+
+      if (printChar) {
+        await printJob(job);
+      } else {
+        pendingJob = job;
+        setStatus('📋 Bill received! Connect printer to print.', 'idle');
+      }
+    } catch(e) {
+      setStatus('❌ Bad job data: ' + e.message, 'error');
     }
   }
 
-  // ── Listen for print jobs from parent (Apps Script iframe) ───────────────────
-  window.addEventListener('message', async (event) => {
-    if (!event.data) return;
-
-    if (event.data.type === 'PRINT_JOB') {
-      receiptData  = event.data.payload;
-      pendingPrint = true;
-      renderPreview(receiptData);
-
-      if (printChar) {
-        // ✅ Already connected — print immediately!
-        await printCurrentReceipt();
-      } else {
-        setStatus('📋 Receipt ready. Connect printer.', 'idle');
-      }
-    }
-
-    if (event.data.type === 'PING') {
-      // Parent checking if iframe is alive
-      window.parent.postMessage({ type: 'PONG', connected: !!printChar }, '*');
+  // ── localStorage listener (fires when relay.html writes on same origin) ──────
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY && e.newValue) {
+      handlePrintJob(e.newValue);
     }
   });
+
+  // ── Polling fallback (every 1s) in case storage event is missed ──────────────
+  // Some mobile browsers don't always fire the storage event reliably
+  setInterval(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) handlePrintJob(raw);
+  }, 1000);
 
   // ── On load ──────────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
-    // Check URL data (standalone tab mode)
+    // Check URL for data (when opened directly from Apps Script)
     const raw = new URLSearchParams(window.location.search).get('data');
-    if (raw && !isIframe) {
-      try {
-        receiptData  = JSON.parse(decodeURIComponent(raw));
-        pendingPrint = true;
-        renderPreview(receiptData);
-        setStatus('Connect printer to print', 'idle');
-      } catch(e) {}
+    if (raw) {
+      pendingJob = JSON.parse(decodeURIComponent(raw));
+      renderPreview(pendingJob);
+      history.replaceState(null, '', window.location.pathname);
+      setStatus('Connect printer to print this bill.', 'idle');
     }
 
-    // Notify parent we are ready
-    if (isIframe) {
-      window.parent.postMessage({ type: 'PRINTER_READY' }, '*');
-    }
+    // Clear any stale job in localStorage on fresh load
+    localStorage.removeItem(STORAGE_KEY);
   });
 
-  // ── Connect (manual — required first time by browser) ────────────────────────
+  // ── Connect Bluetooth ────────────────────────────────────────────────────────
   async function connectPrinter() {
     try {
-      setStatus('Scanning...', 'loading', true);
+      setStatus('Scanning for printer...', 'loading', true);
       document.getElementById('connectBtn').disabled = true;
 
       const device = await navigator.bluetooth.requestDevice({
@@ -193,13 +198,14 @@
 
       const ok = await connectToDevice(device);
       if (ok) {
-        setStatus('✅ Connected: ' + (device.name || 'Printer'), 'success');
-        document.getElementById('printBtn').disabled   = false;
+        setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('forgetBtn').style.display = 'block';
 
-        // Print if job was waiting
-        if (pendingPrint && receiptData) await printCurrentReceipt();
+        if (pendingJob) {
+          await printJob(pendingJob);
+          pendingJob = null;
+        }
       } else {
         setStatus('❌ UUID not matched. Try again.', 'error');
         document.getElementById('connectBtn').disabled = false;
@@ -210,7 +216,6 @@
     }
   }
 
-  // ── Connect to gatt ──────────────────────────────────────────────────────────
   async function connectToDevice(device) {
     try {
       const server = await device.gatt.connect();
@@ -228,34 +233,31 @@
   // ── Auto reconnect on disconnect ─────────────────────────────────────────────
   async function onDisconnected() {
     printChar = null;
-    document.getElementById('printBtn').disabled = true;
     setStatus('Disconnected. Reconnecting...', 'loading', true);
-
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 1500));
       if (!savedDevice) break;
       const ok = await connectToDevice(savedDevice);
       if (ok) {
         setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
-        document.getElementById('printBtn').disabled = false;
         return;
       }
     }
-    setStatus('⚠️ Printer OFF or out of range.', 'error');
+    setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
     document.getElementById('connectBtn').disabled = false;
   }
 
-  // ── Forget printer ───────────────────────────────────────────────────────────
+  // ── Forget ───────────────────────────────────────────────────────────────────
   function forgetPrinter() {
     if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
     printChar = savedDevice = null;
-    document.getElementById('printBtn').disabled = true;
     document.getElementById('forgetBtn').style.display = 'none';
     setStatus('Forgotten. Connect again.', 'idle');
   }
 
-  // ── Render receipt preview ───────────────────────────────────────────────────
+  // ── Render preview ───────────────────────────────────────────────────────────
   function renderPreview(data) {
+    if (!data || !data.header || !data.items) return;
     const { header, items } = data;
     let total = 0, rows = '';
     items.forEach((item, i) => {
@@ -264,8 +266,7 @@
         <td>${i+1}.</td><td>${item.name}</td>
         <td>${item.qty}x</td>
         <td align="center">${item.price}</td>
-        <td align="right"><b>${t}</b></td>
-      </tr>`;
+        <td align="right"><b>${t}</b></td></tr>`;
     });
     document.getElementById('receiptPreview').innerHTML = `
       <div style="text-align:center">
@@ -278,10 +279,7 @@
       Mobile   : ${header.mobile}<br>
       Payment  : ${header.paymentMethod}
       <hr style="margin:2px 0">
-      <table>
-        <tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
-        ${rows}
-      </table>
+      <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
       <hr style="margin:2px 0">
       <div style="text-align:right"><b>Total ₹ ${total}</b></div>
       <hr style="margin:2px 0">
@@ -289,15 +287,14 @@
   }
 
   // ── Print ────────────────────────────────────────────────────────────────────
-  async function printCurrentReceipt() {
-    if (!printChar || !receiptData) return;
-    pendingPrint = false;
+  async function printJob(data) {
+    if (!printChar) return;
     setStatus('Printing...', 'loading', true);
     try {
-      await sendChunks(buildEscPos(receiptData));
-      setStatus('✅ Printed! Ready for next.', 'success');
+      await sendChunks(buildEscPos(data));
+      setStatus('✅ Printed! Ready for next bill.', 'success');
     } catch(e) {
-      setStatus('❌ ' + e.message, 'error');
+      setStatus('❌ Print failed: ' + e.message, 'error');
     }
   }
 
