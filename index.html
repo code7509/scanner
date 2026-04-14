@@ -340,7 +340,8 @@ items.forEach((item, i) => {
   const line2Name = fullName.substring(14); // remaining text
 
   const qty  = centerText(item.qty, colQtyWidth); 
-  const rate = String(item.price).padStart(colRateWidth);
+   const rateValue = Number(item.price).toString();   // 👈 fix
+  const rate  = centerText(rateValue, colRateWidth);
   const tot  = String(it).padStart(colTotalWidth);
 
   // First line (with all columns)
