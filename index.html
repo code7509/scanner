@@ -162,12 +162,24 @@
   });
 
   // ── Method 3: Polling every 800ms (most reliable on Android) ────────────────
-  setInterval(async () => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
-  }, 800);
+  // setInterval(async () => {
+  //   const raw = localStorage.getItem(STORAGE_KEY);
+  //   if (!raw) return;
+  //   try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
+  // }, 800);
+setInterval(async () => {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
 
+  try {
+    const job = JSON.parse(raw);
+    await handlePrintJob(job);
+
+    // ✅ REMOVE only after printing
+    localStorage.removeItem(STORAGE_KEY);
+
+  } catch(e) {}
+}, 500);
   // ── On page load ─────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
     const raw = new URLSearchParams(window.location.search).get('data');
