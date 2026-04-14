@@ -42,7 +42,7 @@
           printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
         } catch(e) {}
         if (attempts >= 5) clearInterval(send);
-      }, 300);
+      }, 3);
     }
 
     document.getElementById('title').textContent = '✅ Sent!';
@@ -51,7 +51,7 @@
     setTimeout(() => {
       try { window.close(); } catch(e) {}
       document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 1500);
+    }, 500);
 
   } catch(e) {
     document.getElementById('title').textContent = '❌ Error';
