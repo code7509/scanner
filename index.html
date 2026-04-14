@@ -325,7 +325,7 @@ function centerText(text, width) {
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
     const hQty   = centerText('Qty', colQtyWidth);
-    const hRate  = centerText('Rate', colRateWidth);
+    const hRate  = 'Rate'.padStart(colRateWidth);
     const hTotal = 'Total'.padStart(colTotalWidth);
     
     t += hIndex + hItem + hQty + hRate + hTotal + '\n';
@@ -341,7 +341,7 @@ items.forEach((item, i) => {
 
   const qty  = centerText(item.qty, colQtyWidth); 
    const rateValue = Number(item.price).toString();   // 👈 fix
-  const rate  = centerText(rateValue, colRateWidth);
+  const rate  = rateValue.padStart(colRateWidth);
   const tot  = String(it).padStart(colTotalWidth);
 
   // First line (with all columns)
