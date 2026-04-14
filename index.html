@@ -309,16 +309,19 @@
     t += 'Customer: ' + header.customerName + LF;
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
-    t += '#  Item               Qty  Rate   Total' + LF + LINE;
+    t += '# Item      Qty Rate Total' + LF + LINE;
 
-    items.forEach((item, i) => {
-      const it = item.qty * item.price; total += it;
-      t += String(i+1).padStart(2) + ' ' +
-           item.name.substring(0,15).padEnd(15) +
-           String(item.qty).padStart(4) + ' ' +
-           String(item.price).padStart(5) + ' ' +
-           String(it).padStart(7) + LF;
-    });
+       items.forEach((item, i) => {
+  const it = item.qty * item.price;
+  total += it;
+
+  const name = item.name.substring(0, 10).padEnd(10); // shorter name
+  const qty  = String(item.qty).padStart(3);
+  const rate = String(item.price).padStart(5);
+  const tot  = String(it).padStart(6);
+
+  t += `${String(i+1).padStart(2)} ${name}${qty} ${rate} ${tot}\n`;
+});
 
     t += LINE + RIGHT + BON + 'Total: Rs.' + total + '   ' + BOFF + LF;
     t += LINE + CENTER + 'Thank You! Visit Again' + LF;
