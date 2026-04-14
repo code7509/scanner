@@ -48,10 +48,12 @@
     document.getElementById('title').textContent = '✅ Sent!';
     document.getElementById('msg').textContent = 'Printing now...';
 
-    setTimeout(() => {
-      try { window.close(); } catch(e) {}
-      document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 100);
+    // setTimeout(() => {
+    //   try { 
+        window.close(); 
+    //   } catch(e) {}
+    //   document.getElementById('msg').textContent = 'You can close this tab.';
+    // }, 100);
 
   } catch(e) {
     document.getElementById('title').textContent = '❌ Error';
