@@ -104,7 +104,11 @@
   let savedDevice = null;
   let pendingJob  = null;
   let lastJobId   = null; // prevent duplicate prints
-
+  const colIndexWidth = 2;
+  const colItemWidth  = 10;
+  const colQtyWidth   = 3;
+  const colRateWidth  = 5;
+  const colTotalWidth = 6;
   const STORAGE_KEY = 'jalaram_print_job';
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -309,13 +313,14 @@
     t += 'Customer: ' + header.customerName + LF;
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
-    const hIndex = '#'.padEnd(2);
-    const hItem  = 'Item'.padEnd(10);
-    const hQty   = 'Qty'.padStart(3);
-    const hRate  = 'Rate'.padStart(5);
-    const hTotal = 'Total'.padStart(6);
+    const hIndex = '#'.padEnd(colIndexWidth);
+    const hItem  = 'Item'.padEnd(colItemWidth);
+    const hQty   = 'Qty'.padStart(colQtyWidth);
+    const hRate  = 'Rate'.padStart(colRateWidth);
+    const hTotal = 'Total'.padStart(colTotalWidth);
     
-    t += `${hIndex}${hItem}${hQty} ${hRate} ${hTotal}\n` + LINE;
+    t += hIndex + hItem + hQty + ' ' + hRate + ' ' + hTotal + '\n' + LINE;
+    
 items.forEach((item, i) => {
   const it = item.qty * item.price;
   total += it;
@@ -331,7 +336,13 @@ items.forEach((item, i) => {
 
   // First line (with all columns)
   const index = (i+1 < 10) ? (i+1 + ' ') : (i+1);
-  t += `${index} ${line1Name}${qty} ${rate} ${tot}\n`;
+  // const index = (i+1).toString().padEnd(colIndexWidth);
+const name  = item.name.substring(0, colItemWidth).padEnd(colItemWidth);
+const qty   = String(item.qty).padStart(colQtyWidth);
+const rate  = String(item.price).padStart(colRateWidth);
+const tot   = String(it).padStart(colTotalWidth);
+
+t += index + name + qty + ' ' + rate + ' ' + tot + '\n';
 
   // Second line (only if extra name exists)
   if (line2Name) {
