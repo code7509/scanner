@@ -311,16 +311,19 @@
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
     t += '# Item          Qty Rate Total' + LF + LINE;
 
-       items.forEach((item, i) => {
+items.forEach((item, i) => {
   const it = item.qty * item.price;
   total += it;
 
-  const name = item.name.substring(0, 14).padEnd(14); // shorter name
+  // First line → item name full
+  t += `${String(i+1).padStart(2)} ${item.name}\n`;
+
+  // Second line → numbers aligned
   const qty  = String(item.qty).padStart(3);
   const rate = String(item.price).padStart(5);
   const tot  = String(it).padStart(6);
 
-  t += `${String(i+1).padStart(2)} ${name}${qty} ${rate} ${tot}\n`;
+  t += `   ${qty} ${rate} ${tot}\n`;
 });
 
     t += LINE + RIGHT + BON + 'Total: Rs.' + total + '   ' + BOFF + LF;
