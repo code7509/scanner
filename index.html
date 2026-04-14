@@ -309,7 +309,13 @@
     t += 'Customer: ' + header.customerName + LF;
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
-    t += '#  Item      Qty Rate Total' + LF + LINE;
+    const hIndex = '#'.padEnd(2);
+    const hItem  = 'Item'.padEnd(10);
+    const hQty   = 'Qty'.padStart(3);
+    const hRate  = 'Rate'.padStart(5);
+    const hTotal = 'Total'.padStart(6);
+    
+    t += `${hIndex}${hItem}${hQty} ${hRate} ${hTotal}\n` + LINE;
 items.forEach((item, i) => {
   const it = item.qty * item.price;
   total += it;
