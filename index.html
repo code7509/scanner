@@ -103,12 +103,8 @@
   let printChar   = null;
   let savedDevice = null;
   let pendingJob  = null;
-  let lastJobId   = null; // prevent duplicate prints
-  const colIndexWidth = 2;
-  const colItemWidth  = 10;
-  const colQtyWidth   = 3;
-  const colRateWidth  = 5;
-  const colTotalWidth = 6;
+  let lastJobId   = null; // prevent duplicate print
+  
   const STORAGE_KEY = 'jalaram_print_job';
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -313,6 +309,11 @@
     t += 'Customer: ' + header.customerName + LF;
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
+    const colIndexWidth = 2;
+    const colItemWidth  = 10;
+    const colQtyWidth   = 3;
+    const colRateWidth  = 5;
+    const colTotalWidth = 6;
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
     const hQty   = 'Qty'.padStart(colQtyWidth);
