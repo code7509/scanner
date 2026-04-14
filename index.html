@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jalaram Printer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f4f8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    h2 { color: #333; margin-bottom: 16px; font-size: 18px; }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      margin-bottom: 16px;
+    }
+
+    .status-box {
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      text-align: center;
+      font-weight: 500;
+    }
+    .status-box.idle     { background: #f1f5f9; color: #64748b; }
+    .status-box.success  { background: #dcfce7; color: #16a34a; }
+    .status-box.error    { background: #fee2e2; color: #dc2626; }
+    .status-box.loading  { background: #dbeafe; color: #2563eb; }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 10px;
+      transition: opacity 0.2s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #connectBtn { background: #2563eb; color: white; }
+    #printBtn   { background: #16a34a; color: white; }
+
+    /* Receipt preview */
+    #receiptPreview {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      background: #fff;
+      padding: 16px;
+      border: 1px dashed #ccc;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    #receiptPreview table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    #receiptPreview td, #receiptPreview th {
+      padding: 2px 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>🖨️ Jalaram Printer</h2>
+
+  <div class="card">
+    <div id="statusBox" class="status-box idle">Not connected</div>
+    <button id="connectBtn" onclick="connectPrinter()">🔗 Connect Bluetooth Printer</button>
+    <button id="printBtn" onclick="printReceipt()" disabled>🖨️ Print Receipt</button>
+  </div>
+
+  <div id="receiptPreview">Loading receipt data...</div>
+
+<script>
+  // ─── Parse receipt data from URL ───────────────────────────────────────────
+  let receiptData = null;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('data');
+    if (raw) {
+      receiptData = JSON.parse(decodeURIComponent(raw));
+      renderPreview(receiptData);
+    } else {
+      // Demo data if no URL params (for testing)
+      receiptData = {
+        header: {
+          billNo: "001",
+          date: new Date().toLocaleDateString('en-IN'),
+          customerName: "Test Customer",
+          mobile: "9999999999",
+          paymentMethod: "Cash"
+        },
+        items: [
+          { name: "Sugar 1kg", qty: 2, price: 45 },
+          { name: "Rice 5kg",  qty: 1, price: 280 }
+        ]
+      };
+      renderPreview(receiptData);
+    }
+  } catch(e) {
+    document.getElementById('receiptPreview').textContent = 'Error loading data: ' + e.message;
+  }
+
+  function renderPreview(data) {
+    const { header, items } = data;
+    let total = 0;
+    let rows = '';
+
+    items.forEach((item, i) => {
+      const itemTotal = item.qty * item.price;
+      total += itemTotal;
+      rows += `<tr>
+        <td>${i+1}.</td>
+        <td>${item.name}</td>
+        <td>${item.qty} x</td>
+        <td align="center">${item.price}</td>
+        <td align="right"><b>${itemTotal}</b></td>
+      </tr>`;
+    });
+
+    document.getElementById('receiptPreview').innerHTML = `
+      <div style="text-align:center">
+        <b style="font-size:14px">Jalaram Super Store</b><br>
+        Barwala(G)<br>9725792370<br>
+        ----------------------------
+      </div>
+      Bill : ${header.billNo}<br>
+      Date : ${header.date}<hr style="margin:2px 0">
+      Customer : ${header.customerName}<br>
+      Mobile   : ${header.mobile}<br>
+      Payment  : ${header.paymentMethod}
+      <hr style="margin:2px 0">
+      <table>
+        <tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
+        ${rows}
+      </table>
+      <hr style="margin:2px 0">
+      <div style="text-align:right"><b>Total ₹ ${total}</b></div>
+      <hr style="margin:2px 0">
+      <div style="text-align:center">Thank You Visit Again</div>
+    `;
+  }
+
+  // ─── Bluetooth ──────────────────────────────────────────────────────────────
+  let printChar = null;
+
+  const PROFILES = [
+    { service: '000018f0-0000-1000-8000-00805f9b34fb', characteristic: '00002af1-0000-1000-8000-00805f9b34fb', name: 'A' },
+    { service: 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic: 'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f', name: 'B' },
+    { service: '49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic: '49535343-8841-43f4-a8d4-ecbe34729bb3', name: 'C' },
+  ];
+
+  function setStatus(msg, type = 'idle') {
+    const box = document.getElementById('statusBox');
+    box.textContent = msg;
+    box.className = 'status-box ' + type;
+  }
+
+  async function connectPrinter() {
+    try {
+      setStatus('Scanning for printer...', 'loading');
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: PROFILES.map(p => p.service)
+      });
+
+      setStatus('Connecting...', 'loading');
+      const server = await device.gatt.connect();
+
+      for (const profile of PROFILES) {
+        try {
+          const svc  = await server.getPrimaryService(profile.service);
+          printChar  = await svc.getCharacteristic(profile.characteristic);
+          setStatus(`✅ Connected: ${device.name}`, 'success');
+          document.getElementById('printBtn').disabled = false;
+          return;
+        } catch(e) { /* try next */ }
+      }
+
+      setStatus('❌ Printer found but UUID not matched. Contact support.', 'error');
+    } catch(e) {
+      setStatus('❌ ' + e.message, 'error');
+    }
+  }
+
+  async function printReceipt() {
+    if (!printChar || !receiptData) return;
+
+    setStatus('Printing...', 'loading');
+    try {
+      const esc = buildEscPos(receiptData);
+      await sendChunks(esc);
+      setStatus('✅ Printed successfully!', 'success');
+    } catch(e) {
+      setStatus('❌ Print failed: ' + e.message, 'error');
+    }
+  }
+
+  function buildEscPos(data) {
+    const { header, items } = data;
+    let total = 0;
+
+    const LF  = '\n';
+    const ESC  = '\x1B';
+    const GS   = '\x1D';
+    const INIT = ESC + '@';          // Initialize
+    const CENTER = ESC + '\x61\x01'; // Center align
+    const LEFT   = ESC + '\x61\x00'; // Left align
+    const RIGHT  = ESC + '\x61\x02'; // Right align
+    const BOLD_ON  = ESC + '\x45\x01';
+    const BOLD_OFF = ESC + '\x45\x00';
+    const CUT = GS + '\x56\x41\x05';
+
+    const LINE = '--------------------------------' + LF;
+    const DLINE = '================================' + LF;
+
+    function padLine(left, right, width = 32) {
+      const space = width - left.length - right.length;
+      return left + ' '.repeat(Math.max(space, 1)) + right;
+    }
+
+    let text = INIT;
+    text += CENTER;
+    text += BOLD_ON + 'Jalaram Super Store' + BOLD_OFF + LF;
+    text += 'Barwala(G)' + LF;
+    text += '9725792370' + LF;
+    text += LINE;
+
+    text += LEFT;
+    text += 'Bill No : ' + header.billNo + LF;
+    text += 'Date    : ' + header.date + LF;
+    text += LINE;
+    text += 'Customer: ' + header.customerName + LF;
+    text += 'Mobile  : ' + header.mobile + LF;
+    text += 'Payment : ' + header.paymentMethod + LF;
+    text += LINE;
+
+    // Table header
+    text += '#  Item               Qty  Rate  Total' + LF;
+    text += LINE;
+
+    items.forEach((item, i) => {
+      const itemTotal = item.qty * item.price;
+      total += itemTotal;
+
+      // Truncate item name to fit
+      const name = item.name.substring(0, 16).padEnd(16);
+      const num  = String(i + 1).padStart(2);
+      const qty  = String(item.qty).padStart(3);
+      const rate = String(item.price).padStart(5);
+      const tot  = String(itemTotal).padStart(6);
+
+      text += `${num} ${name} ${qty} ${rate} ${tot}` + LF;
+    });
+
+    text += LINE;
+    text += RIGHT + BOLD_ON + 'Total: Rs.' + total + '  ' + BOLD_OFF + LF;
+    text += LINE;
+    text += CENTER + 'Thank You! Visit Again' + LF;
+    text += LF + LF + LF;
+    text += CUT;
+
+    return new TextEncoder().encode(text);
+  }
+
+  async function sendChunks(data, chunkSize = 100) {
+    for (let i = 0; i < data.length; i += chunkSize) {
+      await printChar.writeValue(data.slice(i, i + chunkSize));
+      await new Promise(r => setTimeout(r, 50));
+    }
+  }
+</script>
+
+</body>
+</html>
