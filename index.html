@@ -339,11 +339,11 @@ items.forEach((item, i) => {
   const index = (i+1 < 10) ? (i+1 + ' ') : (i+1);
   // const index = (i+1).toString().padEnd(colIndexWidth);
 const name  = item.name.substring(0, colItemWidth).padEnd(colItemWidth);
-const qty   = String(item.qty).padStart(colQtyWidth);
-const rate  = String(item.price).padStart(colRateWidth);
-const tot   = String(it).padStart(colTotalWidth);
+const qtyStr   = String(item.qty).padStart(colQtyWidth);
+const rateStr  = String(item.price).padStart(colRateWidth);
+const totStr   = String(it).padStart(colTotalWidth);
 
-t += index + name + qty + ' ' + rate + ' ' + tot + '\n';
+t += index + name + qtyStr + ' ' + rateStr + ' ' + totStr + '\n';
 
   // Second line (only if extra name exists)
   if (line2Name) {
