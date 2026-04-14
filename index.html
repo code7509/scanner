@@ -315,15 +315,22 @@ items.forEach((item, i) => {
   const it = item.qty * item.price;
   total += it;
 
-  // First line → item name full
-  t += `${String(i+1).padStart(2)} ${item.name}\n`;
+  const fullName = item.name;
 
-  // Second line → numbers aligned
+  const line1Name = fullName.substring(0, 10).padEnd(10);
+  const line2Name = fullName.substring(10); // remaining text
+
   const qty  = String(item.qty).padStart(3);
   const rate = String(item.price).padStart(5);
   const tot  = String(it).padStart(6);
 
-  t += `   ${qty} ${rate} ${tot}\n`;
+  // First line (with all columns)
+  t += `${String(i+1).padStart(2)} ${line1Name}${qty} ${rate} ${tot}\n`;
+
+  // Second line (only if extra name exists)
+  if (line2Name) {
+    t += `   ${line2Name}\n`; // indent for alignment
+  }
 });
 
     t += LINE + RIGHT + BON + 'Total: Rs.' + total + '   ' + BOFF + LF;
