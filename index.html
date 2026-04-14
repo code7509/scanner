@@ -76,6 +76,23 @@
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Overlay shown when print job arrives while already connected */
+    #printToast {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #16a34a;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      z-index: 999;
+    }
   </style>
 </head>
 <body>
@@ -83,20 +100,19 @@
   <h2>🖨️ Jalaram Printer</h2>
 
   <div class="card">
-    <div id="statusBox" class="status-box loading">
-      <span class="spinner"></span> Connecting to printer...
-    </div>
-    <button id="connectBtn" onclick="connectPrinter()" style="display:none">🔗 Connect Printer Manually</button>
-    <button id="printBtn" onclick="printReceipt()" disabled>🖨️ Print Receipt</button>
+    <div id="statusBox" class="status-box idle">Not connected</div>
+    <button id="connectBtn" onclick="connectPrinter()">🔗 Connect Bluetooth Printer</button>
+    <button id="printBtn" onclick="printCurrentReceipt()" disabled>🖨️ Print Receipt</button>
     <button id="forgetBtn" onclick="forgetPrinter()" style="display:none">🗑️ Forget Printer</button>
   </div>
 
-  <div id="receiptPreview">Loading receipt...</div>
+  <div id="receiptPreview">Waiting for receipt data...</div>
+  <div id="printToast">✅ Printing...</div>
 
 <script>
-  let printChar  = null;
+  let printChar   = null;
   let savedDevice = null;
-  const isFromApp = new URLSearchParams(window.location.search).has('data');
+  let receiptData = null;
 
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -104,42 +120,165 @@
     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
   ];
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Status helper ───────────────────────────────────────────────────────────
   function setStatus(msg, type='idle', spinner=false) {
     const b = document.getElementById('statusBox');
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
 
-  function showConnectBtn(show) {
-    document.getElementById('connectBtn').style.display = show ? 'block' : 'none';
-  }
+  // ── Listen for print jobs sent via postMessage from Apps Script ─────────────
+  window.addEventListener('message', async (event) => {
+    // Accept messages from any origin since Apps Script uses different domains
+    if (!event.data || event.data.type !== 'PRINT_JOB') return;
 
-  function showForgetBtn(show) {
-    document.getElementById('forgetBtn').style.display = show ? 'block' : 'none';
-  }
+    const data = event.data.payload;
+    receiptData = data;
+    renderPreview(data);
 
-  // ── Receipt data ────────────────────────────────────────────────────────────
-  let receiptData = null;
-  try {
+    if (printChar) {
+      // Already connected — print immediately!
+      await printCurrentReceipt();
+    } else {
+      // Not connected yet — show data and ask user to connect
+      setStatus('Receipt received! Connect printer to print.', 'idle');
+    }
+  });
+
+  // ── On page load: check URL for data (first open) ───────────────────────────
+  window.addEventListener('load', () => {
     const raw = new URLSearchParams(window.location.search).get('data');
-    receiptData = raw ? JSON.parse(decodeURIComponent(raw)) : getDemoData();
-    renderPreview(receiptData);
-  } catch(e) {
-    document.getElementById('receiptPreview').textContent = 'Error: ' + e.message;
+    if (raw) {
+      try {
+        receiptData = JSON.parse(decodeURIComponent(raw));
+        renderPreview(receiptData);
+        setStatus('Connect printer to print receipt', 'idle');
+      } catch(e) {
+        setStatus('Error loading receipt', 'error');
+      }
+    }
+    // Try silent reconnect using previously permitted device
+    tryAutoReconnect();
+  });
+
+  // ── Silent reconnect (no UI popup) ─────────────────────────────────────────
+  async function tryAutoReconnect() {
+    try {
+      const devices = await navigator.bluetooth.getDevices();
+      if (devices.length === 0) return; // no saved device, wait for manual connect
+
+      const device = devices[0];
+      savedDevice  = device;
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+
+      setStatus('Reconnecting to ' + (device.name || 'printer') + '...', 'loading', true);
+
+      // Watchdog: wait for GATT advertisement (requires printer to be ON and nearby)
+      await device.watchAdvertisements();
+      device.addEventListener('advertisementreceived', async () => {
+        try {
+          await device.watchAdvertisements({ signal: AbortSignal.timeout(100) });
+        } catch(e) {}
+        const ok = await connectToDevice(device);
+        if (ok) {
+          setStatus('✅ Connected: ' + (device.name || 'Printer'), 'success');
+          document.getElementById('printBtn').disabled = false;
+          document.getElementById('forgetBtn').style.display = 'block';
+          // If receipt data already loaded, auto-print
+          if (receiptData) printCurrentReceipt();
+        }
+      }, { once: true });
+
+      // Timeout after 8 seconds — show manual button
+      setTimeout(() => {
+        if (!printChar) {
+          setStatus('⚠️ Printer not found. Is it ON?', 'error');
+          document.getElementById('connectBtn').style.display = 'block';
+          try { device.watchAdvertisements && device.unwatchAdvertisements(); } catch(e) {}
+        }
+      }, 8000);
+
+    } catch(e) {
+      // watchAdvertisements not supported or no saved device — just show connect button
+      setStatus('Tap to connect printer', 'idle');
+    }
   }
 
-  function getDemoData() {
-    return {
-      header: { billNo:"001", date: new Date().toLocaleDateString('en-IN'),
-                customerName:"Test Customer", mobile:"9999999999", paymentMethod:"Cash" },
-      items: [
-        { name:"Sugar 1kg", qty:2, price:45 },
-        { name:"Rice 5kg",  qty:1, price:280 }
-      ]
-    };
+  // ── Connect to a gatt device ────────────────────────────────────────────────
+  async function connectToDevice(device) {
+    try {
+      const server = await device.gatt.connect();
+      for (const p of PROFILES) {
+        try {
+          const svc = await server.getPrimaryService(p.service);
+          printChar  = await svc.getCharacteristic(p.characteristic);
+          return true;
+        } catch(e) {}
+      }
+    } catch(e) {}
+    return false;
   }
 
+  // ── Manual connect (first time) ─────────────────────────────────────────────
+  async function connectPrinter() {
+    try {
+      setStatus('Scanning...', 'loading', true);
+      document.getElementById('connectBtn').disabled = true;
+
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: PROFILES.map(p => p.service)
+      });
+
+      setStatus('Connecting...', 'loading', true);
+      savedDevice = device;
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+
+      const ok = await connectToDevice(device);
+      if (ok) {
+        setStatus('✅ Connected: ' + (device.name || 'Printer'), 'success');
+        document.getElementById('printBtn').disabled = false;
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('forgetBtn').style.display = 'block';
+        if (receiptData) printCurrentReceipt();
+      } else {
+        setStatus('❌ UUID not matched. Try again.', 'error');
+        document.getElementById('connectBtn').disabled = false;
+      }
+    } catch(e) {
+      setStatus('❌ ' + e.message, 'error');
+      document.getElementById('connectBtn').disabled = false;
+    }
+  }
+
+  // ── Auto-reconnect on disconnect ────────────────────────────────────────────
+  async function onDisconnected() {
+    printChar = null;
+    document.getElementById('printBtn').disabled = true;
+    setStatus('Disconnected. Reconnecting...', 'loading', true);
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const ok = await connectToDevice(savedDevice);
+      if (ok) {
+        setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
+        document.getElementById('printBtn').disabled = false;
+        return;
+      }
+    }
+    setStatus('⚠️ Could not reconnect. Is printer ON?', 'error');
+    document.getElementById('connectBtn').style.display = 'block';
+  }
+
+  // ── Forget printer ──────────────────────────────────────────────────────────
+  function forgetPrinter() {
+    if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
+    printChar = savedDevice = null;
+    document.getElementById('printBtn').disabled = true;
+    document.getElementById('forgetBtn').style.display = 'none';
+    setStatus('Printer forgotten.', 'idle');
+  }
+
+  // ── Render receipt preview ──────────────────────────────────────────────────
   function renderPreview(data) {
     const { header, items } = data;
     let total = 0, rows = '';
@@ -162,138 +301,19 @@
       <div style="text-align:center">Thank You Visit Again</div>`;
   }
 
-  // ── Connect to a device object ───────────────────────────────────────────────
-  async function connectToDevice(device) {
-    const server = await device.gatt.connect();
-    for (const p of PROFILES) {
-      try {
-        const svc = await server.getPrimaryService(p.service);
-        printChar  = await svc.getCharacteristic(p.characteristic);
-        return true;
-      } catch(e) {}
-    }
-    return false;
-  }
-
-  // ── Auto-reconnect on page load (no picker shown!) ──────────────────────────
-  async function autoReconnect() {
-    try {
-      // getDevices() returns already-permitted devices — no popup!
-      const devices = await navigator.bluetooth.getDevices();
-      if (devices.length === 0) {
-        // No previously paired device — show manual connect button
-        setStatus('No saved printer. Connect manually.', 'idle');
-        showConnectBtn(true);
-        return;
-      }
-
-      // Try each saved device
-      for (const device of devices) {
-        try {
-          setStatus(`Connecting to ${device.name || 'printer'}...`, 'loading', true);
-          savedDevice = device;
-
-          // Listen for disconnect
-          device.addEventListener('gattserverdisconnected', onDisconnected);
-
-          const ok = await connectToDevice(device);
-          if (ok) {
-            setStatus(`✅ Connected: ${device.name || 'Printer'}`, 'success');
-            document.getElementById('printBtn').disabled = false;
-            showForgetBtn(true);
-            if (isFromApp) printReceipt(); // auto-print if opened from Apps Script
-            return;
-          }
-        } catch(e) {}
-      }
-
-      // Saved device found but couldn't connect (off/out of range)
-      setStatus('⚠️ Printer not reachable. Is it ON?', 'error');
-      showConnectBtn(true);
-
-    } catch(e) {
-      // getDevices() not supported (older Chrome) — fall back to manual
-      setStatus('Tap to connect printer', 'idle');
-      showConnectBtn(true);
-    }
-  }
-
-  // ── Manual connect (first time) ─────────────────────────────────────────────
-  async function connectPrinter() {
-    try {
-      setStatus('Scanning...', 'loading', true);
-      showConnectBtn(false);
-
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: PROFILES.map(p => p.service)
-      });
-
-      setStatus('Connecting...', 'loading', true);
-      savedDevice = device;
-      device.addEventListener('gattserverdisconnected', onDisconnected);
-
-      const ok = await connectToDevice(device);
-      if (ok) {
-        setStatus(`✅ Connected: ${device.name || 'Printer'}`, 'success');
-        document.getElementById('printBtn').disabled = false;
-        showForgetBtn(true);
-        if (isFromApp) printReceipt();
-      } else {
-        setStatus('❌ UUID not matched. Try again.', 'error');
-        showConnectBtn(true);
-      }
-    } catch(e) {
-      setStatus('❌ ' + e.message, 'error');
-      showConnectBtn(true);
-    }
-  }
-
-  // ── Auto-reconnect on disconnect ────────────────────────────────────────────
-  async function onDisconnected() {
-    setStatus('Disconnected. Reconnecting...', 'loading', true);
-    document.getElementById('printBtn').disabled = true;
-
-    // Retry up to 5 times
-    for (let i = 0; i < 5; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      try {
-        const ok = await connectToDevice(savedDevice);
-        if (ok) {
-          setStatus(`✅ Reconnected: ${savedDevice.name || 'Printer'}`, 'success');
-          document.getElementById('printBtn').disabled = false;
-          return;
-        }
-      } catch(e) {}
-    }
-    setStatus('⚠️ Could not reconnect. Is printer ON?', 'error');
-    showConnectBtn(true);
-  }
-
-  // ── Forget printer ──────────────────────────────────────────────────────────
-  async function forgetPrinter() {
-    if (savedDevice) {
-      try { savedDevice.gatt.disconnect(); } catch(e) {}
-      // Note: browser will forget on next requestDevice with different device
-    }
-    printChar = null;
-    savedDevice = null;
-    document.getElementById('printBtn').disabled = true;
-    showForgetBtn(false);
-    setStatus('Printer forgotten. Connect again.', 'idle');
-    showConnectBtn(true);
-  }
-
   // ── Print ───────────────────────────────────────────────────────────────────
-  async function printReceipt() {
+  async function printCurrentReceipt() {
     if (!printChar || !receiptData) return;
+    const toast = document.getElementById('printToast');
+    toast.style.display = 'block';
     setStatus('Printing...', 'loading', true);
     try {
       await sendChunks(buildEscPos(receiptData));
-      setStatus('✅ Printed successfully!', 'success');
+      setStatus('✅ Printed! Ready for next bill.', 'success');
     } catch(e) {
       setStatus('❌ ' + e.message, 'error');
     }
+    setTimeout(() => toast.style.display = 'none', 2000);
   }
 
   function buildEscPos(data) {
@@ -335,9 +355,6 @@
       await new Promise(r => setTimeout(r, 50));
     }
   }
-
-  // ── Start auto-reconnect on page load ───────────────────────────────────────
-  window.addEventListener('load', autoReconnect);
 </script>
 </body>
 </html>
