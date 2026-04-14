@@ -166,7 +166,7 @@
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
-  }, 800);
+  }, 10);
 
   // ── On page load ─────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
