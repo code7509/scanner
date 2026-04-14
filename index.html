@@ -324,10 +324,10 @@ function centerText(text, width) {
     const colTotalWidth = 6;
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
-    const hQty   = centerText('Qty', colQtyWidth);
-    const hRate  = centerText('Rate', colRateWidth);
-    const hTotal = centerText('Total', colTotalWidth);
-    
+    const hQty   = 'Qty'.padStart(colQtyWidth);
+    const hRate  = 'Rate'.padStart(colRateWidth);
+    const hTotal = 'Total'.padStart(colTotalWidth);
+        
     t += hIndex + hItem + hQty + hRate + hTotal + '\n';
     
 items.forEach((item, i) => {
