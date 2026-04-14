@@ -15,21 +15,30 @@
       padding: 20px;
       min-height: 100vh;
     }
-    h2 { color: #333; margin-bottom: 16px; font-size: 18px; }
+
+    /* When inside iframe, make it compact */
+    body.iframe-mode {
+      padding: 10px;
+      background: transparent;
+    }
+
+    h2 { color: #333; margin-bottom: 12px; font-size: 16px; }
+
     .card {
       background: white;
       border-radius: 12px;
-      padding: 20px;
+      padding: 16px;
       width: 100%;
       max-width: 400px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.1);
-      margin-bottom: 16px;
+      margin-bottom: 12px;
     }
+
     .status-box {
-      padding: 10px 16px;
+      padding: 10px 14px;
       border-radius: 8px;
-      font-size: 14px;
-      margin-bottom: 16px;
+      font-size: 13px;
+      margin-bottom: 12px;
       text-align: center;
       font-weight: 500;
     }
@@ -37,62 +46,52 @@
     .status-box.success { background: #dcfce7; color: #16a34a; }
     .status-box.error   { background: #fee2e2; color: #dc2626; }
     .status-box.loading { background: #dbeafe; color: #2563eb; }
+
     button {
       width: 100%;
-      padding: 12px;
+      padding: 11px;
       border: none;
       border-radius: 8px;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
       cursor: pointer;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       transition: opacity 0.2s;
     }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     #connectBtn { background: #2563eb; color: white; }
     #printBtn   { background: #16a34a; color: white; }
-    #forgetBtn  { background: #e2e8f0; color: #475569; font-size:13px; padding:8px; }
+    #forgetBtn  { background: #e2e8f0; color: #475569; font-size: 12px; padding: 7px; }
+
+    .spinner {
+      display: inline-block;
+      width: 11px; height: 11px;
+      border: 2px solid #93c5fd;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     #receiptPreview {
       font-family: 'Courier New', monospace;
-      font-size: 12px;
-      line-height: 1.6;
+      font-size: 11px;
+      line-height: 1.5;
       background: #fff;
-      padding: 16px;
+      padding: 12px;
       border: 1px dashed #ccc;
       border-radius: 8px;
       width: 100%;
       max-width: 400px;
     }
-    #receiptPreview table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    #receiptPreview td, #receiptPreview th { padding: 2px 4px; }
-    .spinner {
-      display: inline-block;
-      width: 12px; height: 12px;
-      border: 2px solid #93c5fd;
-      border-top-color: #2563eb;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin-right: 6px;
-      vertical-align: middle;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    #receiptPreview table { width: 100%; border-collapse: collapse; }
+    #receiptPreview td, #receiptPreview th { padding: 2px 3px; }
 
-    /* Overlay shown when print job arrives while already connected */
-    #printToast {
-      display: none;
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #16a34a;
-      color: white;
-      padding: 12px 24px;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 14px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-      z-index: 999;
-    }
+    /* Hide receipt in iframe mode to save space */
+    body.iframe-mode #receiptPreview { display: none; }
+    body.iframe-mode h2 { display: none; }
   </style>
 </head>
 <body>
@@ -102,17 +101,17 @@
   <div class="card">
     <div id="statusBox" class="status-box idle">Not connected</div>
     <button id="connectBtn" onclick="connectPrinter()">🔗 Connect Bluetooth Printer</button>
-    <button id="printBtn" onclick="printCurrentReceipt()" disabled>🖨️ Print Receipt</button>
+    <button id="printBtn" onclick="printCurrentReceipt()" disabled>🖨️ Print</button>
     <button id="forgetBtn" onclick="forgetPrinter()" style="display:none">🗑️ Forget Printer</button>
   </div>
 
-  <div id="receiptPreview">Waiting for receipt data...</div>
-  <div id="printToast">✅ Printing...</div>
+  <div id="receiptPreview">Waiting for receipt...</div>
 
 <script>
-  let printChar   = null;
-  let savedDevice = null;
-  let receiptData = null;
+  let printChar    = null;
+  let savedDevice  = null;
+  let receiptData  = null;
+  let pendingPrint = false; // queue print if data arrives before connect
 
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -120,106 +119,64 @@
     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
   ];
 
-  // ── Status helper ───────────────────────────────────────────────────────────
+  // ── Detect if running inside iframe ─────────────────────────────────────────
+  const isIframe = window.self !== window.top;
+  if (isIframe) document.body.classList.add('iframe-mode');
+
+  // ── Status ───────────────────────────────────────────────────────────────────
   function setStatus(msg, type='idle', spinner=false) {
     const b = document.getElementById('statusBox');
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
+    // Also notify parent (Apps Script) of status
+    if (isIframe) {
+      window.parent.postMessage({ type: 'PRINTER_STATUS', status: type, msg }, '*');
+    }
   }
 
-  // ── Listen for print jobs sent via postMessage from Apps Script ─────────────
+  // ── Listen for print jobs from parent (Apps Script iframe) ───────────────────
   window.addEventListener('message', async (event) => {
-    // Accept messages from any origin since Apps Script uses different domains
-    if (!event.data || event.data.type !== 'PRINT_JOB') return;
+    if (!event.data) return;
 
-    const data = event.data.payload;
-    receiptData = data;
-    renderPreview(data);
+    if (event.data.type === 'PRINT_JOB') {
+      receiptData  = event.data.payload;
+      pendingPrint = true;
+      renderPreview(receiptData);
 
-    if (printChar) {
-      // Already connected — print immediately!
-      await printCurrentReceipt();
-    } else {
-      // Not connected yet — show data and ask user to connect
-      setStatus('Receipt received! Connect printer to print.', 'idle');
+      if (printChar) {
+        // ✅ Already connected — print immediately!
+        await printCurrentReceipt();
+      } else {
+        setStatus('📋 Receipt ready. Connect printer.', 'idle');
+      }
+    }
+
+    if (event.data.type === 'PING') {
+      // Parent checking if iframe is alive
+      window.parent.postMessage({ type: 'PONG', connected: !!printChar }, '*');
     }
   });
 
-  // ── On page load: check URL for data (first open) ───────────────────────────
+  // ── On load ──────────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
+    // Check URL data (standalone tab mode)
     const raw = new URLSearchParams(window.location.search).get('data');
-    if (raw) {
+    if (raw && !isIframe) {
       try {
-        receiptData = JSON.parse(decodeURIComponent(raw));
+        receiptData  = JSON.parse(decodeURIComponent(raw));
+        pendingPrint = true;
         renderPreview(receiptData);
-        setStatus('Connect printer to print receipt', 'idle');
-      } catch(e) {
-        setStatus('Error loading receipt', 'error');
-      }
+        setStatus('Connect printer to print', 'idle');
+      } catch(e) {}
     }
-    // Try silent reconnect using previously permitted device
-    tryAutoReconnect();
+
+    // Notify parent we are ready
+    if (isIframe) {
+      window.parent.postMessage({ type: 'PRINTER_READY' }, '*');
+    }
   });
 
-  // ── Silent reconnect (no UI popup) ─────────────────────────────────────────
-  async function tryAutoReconnect() {
-    try {
-      const devices = await navigator.bluetooth.getDevices();
-      if (devices.length === 0) return; // no saved device, wait for manual connect
-
-      const device = devices[0];
-      savedDevice  = device;
-      device.addEventListener('gattserverdisconnected', onDisconnected);
-
-      setStatus('Reconnecting to ' + (device.name || 'printer') + '...', 'loading', true);
-
-      // Watchdog: wait for GATT advertisement (requires printer to be ON and nearby)
-      await device.watchAdvertisements();
-      device.addEventListener('advertisementreceived', async () => {
-        try {
-          await device.watchAdvertisements({ signal: AbortSignal.timeout(100) });
-        } catch(e) {}
-        const ok = await connectToDevice(device);
-        if (ok) {
-          setStatus('✅ Connected: ' + (device.name || 'Printer'), 'success');
-          document.getElementById('printBtn').disabled = false;
-          document.getElementById('forgetBtn').style.display = 'block';
-          // If receipt data already loaded, auto-print
-          if (receiptData) printCurrentReceipt();
-        }
-      }, { once: true });
-
-      // Timeout after 8 seconds — show manual button
-      setTimeout(() => {
-        if (!printChar) {
-          setStatus('⚠️ Printer not found. Is it ON?', 'error');
-          document.getElementById('connectBtn').style.display = 'block';
-          try { device.watchAdvertisements && device.unwatchAdvertisements(); } catch(e) {}
-        }
-      }, 8000);
-
-    } catch(e) {
-      // watchAdvertisements not supported or no saved device — just show connect button
-      setStatus('Tap to connect printer', 'idle');
-    }
-  }
-
-  // ── Connect to a gatt device ────────────────────────────────────────────────
-  async function connectToDevice(device) {
-    try {
-      const server = await device.gatt.connect();
-      for (const p of PROFILES) {
-        try {
-          const svc = await server.getPrimaryService(p.service);
-          printChar  = await svc.getCharacteristic(p.characteristic);
-          return true;
-        } catch(e) {}
-      }
-    } catch(e) {}
-    return false;
-  }
-
-  // ── Manual connect (first time) ─────────────────────────────────────────────
+  // ── Connect (manual — required first time by browser) ────────────────────────
   async function connectPrinter() {
     try {
       setStatus('Scanning...', 'loading', true);
@@ -237,10 +194,12 @@
       const ok = await connectToDevice(device);
       if (ok) {
         setStatus('✅ Connected: ' + (device.name || 'Printer'), 'success');
-        document.getElementById('printBtn').disabled = false;
+        document.getElementById('printBtn').disabled   = false;
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('forgetBtn').style.display = 'block';
-        if (receiptData) printCurrentReceipt();
+
+        // Print if job was waiting
+        if (pendingPrint && receiptData) await printCurrentReceipt();
       } else {
         setStatus('❌ UUID not matched. Try again.', 'error');
         document.getElementById('connectBtn').disabled = false;
@@ -251,13 +210,30 @@
     }
   }
 
-  // ── Auto-reconnect on disconnect ────────────────────────────────────────────
+  // ── Connect to gatt ──────────────────────────────────────────────────────────
+  async function connectToDevice(device) {
+    try {
+      const server = await device.gatt.connect();
+      for (const p of PROFILES) {
+        try {
+          const svc = await server.getPrimaryService(p.service);
+          printChar  = await svc.getCharacteristic(p.characteristic);
+          return true;
+        } catch(e) {}
+      }
+    } catch(e) {}
+    return false;
+  }
+
+  // ── Auto reconnect on disconnect ─────────────────────────────────────────────
   async function onDisconnected() {
     printChar = null;
     document.getElementById('printBtn').disabled = true;
     setStatus('Disconnected. Reconnecting...', 'loading', true);
-    for (let i = 0; i < 5; i++) {
+
+    for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 1500));
+      if (!savedDevice) break;
       const ok = await connectToDevice(savedDevice);
       if (ok) {
         setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
@@ -265,55 +241,64 @@
         return;
       }
     }
-    setStatus('⚠️ Could not reconnect. Is printer ON?', 'error');
-    document.getElementById('connectBtn').style.display = 'block';
+    setStatus('⚠️ Printer OFF or out of range.', 'error');
+    document.getElementById('connectBtn').disabled = false;
   }
 
-  // ── Forget printer ──────────────────────────────────────────────────────────
+  // ── Forget printer ───────────────────────────────────────────────────────────
   function forgetPrinter() {
     if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
     printChar = savedDevice = null;
     document.getElementById('printBtn').disabled = true;
     document.getElementById('forgetBtn').style.display = 'none';
-    setStatus('Printer forgotten.', 'idle');
+    setStatus('Forgotten. Connect again.', 'idle');
   }
 
-  // ── Render receipt preview ──────────────────────────────────────────────────
+  // ── Render receipt preview ───────────────────────────────────────────────────
   function renderPreview(data) {
     const { header, items } = data;
     let total = 0, rows = '';
     items.forEach((item, i) => {
       const t = item.qty * item.price; total += t;
-      rows += `<tr><td>${i+1}.</td><td>${item.name}</td><td>${item.qty}x</td>
-               <td align="center">${item.price}</td><td align="right"><b>${t}</b></td></tr>`;
+      rows += `<tr>
+        <td>${i+1}.</td><td>${item.name}</td>
+        <td>${item.qty}x</td>
+        <td align="center">${item.price}</td>
+        <td align="right"><b>${t}</b></td>
+      </tr>`;
     });
     document.getElementById('receiptPreview').innerHTML = `
-      <div style="text-align:center"><b style="font-size:14px">Jalaram Super Store</b><br>
-        Barwala(G)<br>9725792370<br>----------------------------</div>
+      <div style="text-align:center">
+        <b style="font-size:13px">Jalaram Super Store</b><br>
+        Barwala(G)<br>9725792370<br>----------------------------
+      </div>
       Bill : ${header.billNo}<br>Date : ${header.date}
       <hr style="margin:2px 0">
-      Customer : ${header.customerName}<br>Mobile : ${header.mobile}<br>Payment : ${header.paymentMethod}
+      Customer : ${header.customerName}<br>
+      Mobile   : ${header.mobile}<br>
+      Payment  : ${header.paymentMethod}
       <hr style="margin:2px 0">
-      <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
+      <table>
+        <tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
+        ${rows}
+      </table>
       <hr style="margin:2px 0">
       <div style="text-align:right"><b>Total ₹ ${total}</b></div>
       <hr style="margin:2px 0">
       <div style="text-align:center">Thank You Visit Again</div>`;
   }
 
-  // ── Print ───────────────────────────────────────────────────────────────────
+  // ── Print ────────────────────────────────────────────────────────────────────
   async function printCurrentReceipt() {
     if (!printChar || !receiptData) return;
-    const toast = document.getElementById('printToast');
-    toast.style.display = 'block';
+    pendingPrint = false;
     setStatus('Printing...', 'loading', true);
     try {
       await sendChunks(buildEscPos(receiptData));
-      setStatus('✅ Printed! Ready for next bill.', 'success');
+      setStatus('✅ Printed! Ready for next.', 'success');
     } catch(e) {
       setStatus('❌ ' + e.message, 'error');
     }
-    setTimeout(() => toast.style.display = 'none', 2000);
   }
 
   function buildEscPos(data) {
@@ -335,12 +320,11 @@
 
     items.forEach((item, i) => {
       const it = item.qty * item.price; total += it;
-      const num  = String(i+1).padStart(2);
-      const name = item.name.substring(0,15).padEnd(15);
-      const qty  = String(item.qty).padStart(4);
-      const rate = String(item.price).padStart(5);
-      const tot  = String(it).padStart(7);
-      t += `${num} ${name}${qty} ${rate} ${tot}` + LF;
+      t += String(i+1).padStart(2) + ' ' +
+           item.name.substring(0,15).padEnd(15) +
+           String(item.qty).padStart(4) + ' ' +
+           String(item.price).padStart(5) + ' ' +
+           String(it).padStart(7) + LF;
     });
 
     t += LINE + RIGHT + BON + 'Total: Rs.' + total + '   ' + BOFF + LF;
