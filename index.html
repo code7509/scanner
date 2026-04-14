@@ -293,7 +293,15 @@
       setStatus('❌ Print failed: ' + e.message, 'error');
     }
   }
+function centerText(text, width) {
+  text = String(text);
+  if (text.length >= width) return text;
 
+  const left = Math.floor((width - text.length) / 2);
+  const right = width - text.length - left;
+
+  return ' '.repeat(left) + text + ' '.repeat(right);
+}
   function buildEscPos(data) {
     const { header, items } = data;
     let total = 0;
@@ -316,9 +324,9 @@
     const colTotalWidth = 6;
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
-    const hQty   = 'Qty'.padStart(colQtyWidth);
-    const hRate  = 'Rate'.padStart(colRateWidth);
-    const hTotal = 'Total'.padStart(colTotalWidth);
+    const hQty   = centerText('Qty', colQtyWidth);
+    const hRate  = centerText('Rate', colRateWidth);
+    const hTotal = centerText('Total', colTotalWidth);
     
     t += hIndex + hItem + hQty + hRate + hTotal + '\n';
     
@@ -328,22 +336,22 @@ items.forEach((item, i) => {
 
   const fullName = item.name;
 
-  const line1Name = fullName.substring(0, 11).padEnd(11);
-  const line2Name = fullName.substring(10); // remaining text
+  const line1Name = fullName.substring(0, 14).padEnd(14);
+  const line2Name = fullName.substring(14); // remaining text
 
-  const qty  = String(item.qty).padStart(3);
-  const rate = String(item.price).padStart(5);
-  const tot  = String(it).padStart(6);
+  const qty  = centerText(item.qty, colQtyWidth); 
+  const rate = centerText(item.price, colRateWidth); 
+  const tot  = String(it).padStart(colTotalWidth);
 
   // First line (with all columns)
   const index = (i+1 < 10) ? (i+1 + ' ') : (i+1);
   // const index = (i+1).toString().padEnd(colIndexWidth);
-const name  = item.name.substring(0, colItemWidth).padEnd(colItemWidth);
-const qtyStr   = String(item.qty).padStart(colQtyWidth);
-const rateStr  = String(item.price).padStart(colRateWidth);
-const totStr   = String(it).padStart(colTotalWidth);
+// const name  = item.name.substring(0, colItemWidth).padEnd(colItemWidth);
+// const qtyStr   = String(item.qty).padStart(colQtyWidth);
+// const rateStr  = String(item.price).padStart(colRateWidth);
+// const totStr   = String(it).padStart(colTotalWidth);
 
-t += index + name + qty + rate + tot + '\n';
+t += index + line1Name + qty + rate + tot + '\n';
 
   // Second line (only if extra name exists)
   if (line2Name) {
