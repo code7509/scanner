@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sending to printer...</title>
+  <style>
+    body { font-family: sans-serif; display:flex; align-items:center;
+           justify-content:center; height:100vh; margin:0; background:#f0f4f8; }
+    .box { text-align:center; background:white; padding:30px; border-radius:12px;
+           box-shadow:0 2px 12px rgba(0,0,0,0.1); }
+    p { color:#64748b; margin-top:8px; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div style="font-size:32px">🖨️</div>
+    <b>Sending to printer...</b>
+    <p id="msg">Please wait</p>
+  </div>
+
+<script>
+  const STORAGE_KEY = 'jalaram_print_job';
+  const PRINTER_URL = 'https://code7509.github.io/scanner/';
+
+  try {
+    const raw = new URLSearchParams(window.location.search).get('data');
+    if (!raw) throw new Error('No data');
+
+    // Write job to localStorage (printer tab is listening!)
+    localStorage.setItem(STORAGE_KEY, raw);
+
+    document.getElementById('msg').textContent = 'Job sent! This tab will close.';
+
+    // Close this relay tab after 1 second
+    setTimeout(() => window.close(), 1000);
+
+  } catch(e) {
+    document.getElementById('msg').textContent = 'Error: ' + e.message;
+  }
+</script>
+</body>
+</html>
