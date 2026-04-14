@@ -318,9 +318,9 @@ function centerText(text, width) {
     t += 'Mobile  : ' + header.mobile + LF;
     t += 'Payment : ' + header.paymentMethod + LF + LINE;
     const colIndexWidth = 2;
-    const colItemWidth  = 15;
+    const colItemWidth  = 16;
     const colQtyWidth   = 3;
-    const colRateWidth  = 6;
+    const colRateWidth  = 5;
     const colTotalWidth = 6;
     const hIndex = '#'.padEnd(colIndexWidth);
     const hItem  = 'Item'.padEnd(colItemWidth);
@@ -336,8 +336,8 @@ items.forEach((item, i) => {
 
   const fullName = item.name;
 
-  const line1Name = fullName.substring(0, 14).padEnd(14);
-  const line2Name = fullName.substring(14); // remaining text
+  const line1Name = fullName.substring(0, 16).padEnd(16);
+  const line2Name = fullName.substring(16); // remaining text
 
   const qty  = centerText(item.qty, colQtyWidth); 
    const rateValue = Number(item.price).toString();   // 👈 fix
