@@ -25,19 +25,23 @@
     const raw = new URLSearchParams(window.location.search).get('data');
     if (!raw) throw new Error('No data in URL');
 
+    const parsed = JSON.parse(decodeURIComponent(raw));
+    if (!parsed.header || !parsed.items) throw new Error('Invalid data structure');
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     // ── Method 1: Write to localStorage (printer tab polling will catch it) ──
-   localStorage.setItem(STORAGE_KEY, raw);
+   // localStorage.setItem(STORAGE_KEY, raw);
 
     document.getElementById('title').textContent = '✅ Sent!';
     document.getElementById('msg').textContent = 'Closing...';
+    window.close();
 
     // Close this tab immediately
-    setTimeout(() => {
-      try { 
-        window.close(); 
-      } catch(e) {}
-      document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 500);
+    // setTimeout(() => {
+    //   try { 
+    //     window.close(); 
+    //   } catch(e) {}
+      // document.getElementById('msg').textContent = 'You can close this tab.';
+    // }, 500);
 
   } catch(e) {
     document.getElementById('title').textContent = '❌ Error';
