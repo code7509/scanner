@@ -35,30 +35,50 @@ p {
         <p id="msg">Please wait</p>
     </div>
     <script>
-      const PRINTER_URL = 'https://code7509.github.io/scanner/'; 
-      const STORAGE_KEY = 'print_job'; 
-      try { const raw = new URLSearchParams(window.location.search).get('data'); 
-           if (!raw) throw new Error('No data in URL'); 
-           // ── Method 1: Write to localStorage (printer tab polling will catch it) ── 
-           localStorage.setItem(STORAGE_KEY, raw); 
-           // ── Method 2: Open printer tab with target name & postMessage ──────────── // window.open with same target name 'printer' will FOCUS existing // tab instead of opening a new one on Android Chrome 
-           const printerTab = window.open(PRINTER_URL, 'printer'); 
-           if (printerTab) { 
-             // Wait for printer tab to be ready then postMessage 
-             let attempts = 0; 
-             const send = setInterval(() => { 
-               attempts++; 
-               try { 
-                 printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*'); 
-               } catch(e) {} if (attempts >= 5) clearInterval(send); }, 300); 
-           } 
-           document.getElementById('title').textContent = '✅ Sent!'; 
-           document.getElementById('msg').textContent = 'Printing now...'; 
-           // setTimeout(() => { // try { window.close(); // } catch(e) {} // document.getElementById('msg').textContent = 'You can close this tab.'; // }, 100); 
-          } catch(e) { 
-          document.getElementById('title').textContent = '❌ Error'; 
-          document.getElementById('msg').textContent = e.message; 
-      }
+      const PRINTER_URL = 'https://yourname.github.io/scanner/';
+
+try {
+  const raw = new URLSearchParams(window.location.search).get('data');
+  if (!raw) throw new Error('No data in URL');
+
+  const printerTab = window.open(PRINTER_URL, 'printer');
+
+  if (!printerTab) {
+    throw new Error('Popup blocked or printer tab not available');
+  }
+
+  // Wait longer and retry properly
+  let attempts = 0;
+
+  const sendMessage = () => {
+    try {
+      printerTab.postMessage({
+        type: 'PRINT_JOB',
+        payload: JSON.parse(raw)
+      }, '*');
+    } catch (e) {}
+  };
+
+  const interval = setInterval(() => {
+    attempts++;
+    sendMessage();
+
+    if (attempts >= 10) {
+      clearInterval(interval);
+    }
+  }, 500); // ⬅️ slower & more reliable
+
+  document.getElementById('title').textContent = '✅ Sent!';
+  document.getElementById('msg').textContent = 'Printing now...';
+
+  setTimeout(() => {
+    window.close();
+  }, 500);
+
+} catch(e) {
+  document.getElementById('title').textContent = '❌ Error';
+  document.getElementById('msg').textContent = e.message;
+}
     </script>
 </body>
 
