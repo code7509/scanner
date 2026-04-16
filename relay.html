@@ -1,196 +1,65 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-  <meta charset="UTF-8">
-  <title>Sending to printer...</title>
-  <style>
-    body { font-family: sans-serif; display:flex; align-items:center;
-           justify-content:center; height:100vh; margin:0; background:#f0f4f8; }
-    .box { text-align:center; background:white; padding:30px 40px;
-           border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
-    p { color:#64748b; margin-top:8px; font-size:14px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Sending to printer...</title>
+    <style>
+        body {
+  font-family: sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  margin: 0;
+  background: #f0f4f8;
+}
+.box {
+  text-align: center;
+  background: white;
+  padding: 30px 40px;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+p {
+  color: #64748b;
+  margin-top: 8px;
+  font-size: 14px;
+}
+</style>
 </head>
+
 <body>
-  <div class="box">
-    <div style="font-size:36px">🖨️</div>
-    <b id="title">Sending to printer...</b>
-    <p id="msg">Please wait</p>
-  </div>
-<script>
-  const PRINTER_URL = 'https://code7509.github.io/scanner/';
-  const STORAGE_KEY = 'jalaram_print_job';
-
-  try {
-    const raw = new URLSearchParams(window.location.search).get('data');
-    if (!raw) throw new Error('No data in URL');
-
-    // ── Method 1: Write to localStorage (printer tab polling will catch it) ──
-    localStorage.setItem(STORAGE_KEY, raw);
-
-    // ── Method 2: Open printer tab with target name & postMessage ────────────
-    // window.open with same target name 'jalaram_printer' will FOCUS existing
-    // tab instead of opening a new one on Android Chrome
-    const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
-
-    if (printerTab) {
-      // Wait for printer tab to be ready then postMessage
-      let attempts = 0;
-      const send = setInterval(() => {
-        attempts++;
-        try {
-          printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
-        } catch(e) {}
-        if (attempts >= 5) clearInterval(send);
-      }, 300);
-    }
-
-    document.getElementById('title').textContent = '✅ Sent!';
-    document.getElementById('msg').textContent = 'Printing now...';
-
-    setTimeout(() => {
-      try { window.close(); } catch(e) {}
-      document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 1500);
-
-  } catch(e) {
-    document.getElementById('title').textContent = '❌ Error';
-    document.getElementById('msg').textContent = e.message;
-  }
-</script>
+    <div class="box">
+        <div style="font-size:36px">🖨️</div> <b id="title">Sending to printer...</b>
+        <p id="msg">Please wait</p>
+    </div>
+    <script>
+      const PRINTER_URL = 'https://code7509.github.io/scanner/'; 
+      const STORAGE_KEY = 'print_job'; 
+      try { const raw = new URLSearchParams(window.location.search).get('data'); 
+           if (!raw) throw new Error('No data in URL'); 
+           // ── Method 1: Write to localStorage (printer tab polling will catch it) ── 
+           localStorage.setItem(STORAGE_KEY, raw); 
+           // ── Method 2: Open printer tab with target name & postMessage ──────────── // window.open with same target name 'printer' will FOCUS existing // tab instead of opening a new one on Android Chrome 
+           const printerTab = window.open(PRINTER_URL, 'printer'); 
+           if (printerTab) { 
+             // Wait for printer tab to be ready then postMessage 
+             let attempts = 0; 
+             const send = setInterval(() => { 
+               attempts++; 
+               try { 
+                 printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*'); 
+               } catch(e) {} if (attempts >= 5) clearInterval(send); }, 300); 
+           } 
+           document.getElementById('title').textContent = '✅ Sent!'; 
+           document.getElementById('msg').textContent = 'Printing now...'; 
+           // setTimeout(() => { // try { window.close(); // } catch(e) {} // document.getElementById('msg').textContent = 'You can close this tab.'; // }, 100); 
+          } catch(e) { 
+          document.getElementById('title').textContent = '❌ Error'; 
+          document.getElementById('msg').textContent = e.message; 
+      }
+    </script>
 </body>
-</html>
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Sending to printer...</title>
-  <style>
-    body { font-family: sans-serif; display:flex; align-items:center;
-           justify-content:center; height:100vh; margin:0; background:#f0f4f8; }
-    .box { text-align:center; background:white; padding:30px 40px;
-           border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
-    p { color:#64748b; margin-top:8px; font-size:14px; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div style="font-size:36px">🖨️</div>
-    <b id="title">Sending to printer...</b>
-    <p id="msg">Please wait</p>
-  </div>
-<script>
-  const PRINTER_URL = 'https://code7509.github.io/scanner/';
-  const STORAGE_KEY = 'jalaram_print_job';
 
-  try {
-    const raw = new URLSearchParams(window.location.search).get('data');
-    if (!raw) throw new Error('No data in URL');
-
-    const payload = JSON.parse(raw);
-
-    // ── Method 1: BroadcastChannel (same origin, most reliable) ──────────────
-    // This fires instantly if the printer tab is already open on the same origin
-    try {
-      const bc = new BroadcastChannel('jalaram_print');
-      bc.postMessage({ type: 'PRINT_JOB', payload });
-      // Keep channel open briefly so message is delivered before page closes
-      setTimeout(() => bc.close(), 2000);
-    } catch(e) {
-      console.warn('BroadcastChannel not supported:', e.message);
-    }
-
-    // ── Method 2: localStorage (polling fallback in printer tab) ─────────────
-    // Add a timestamp so the same bill posted twice is seen as a new storage event
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...payload, _ts: Date.now() }));
-
-    // ── Method 3: Open/focus printer tab and postMessage ─────────────────────
-    const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
-    if (printerTab) {
-      let attempts = 0;
-      const send = setInterval(() => {
-        attempts++;
-        try {
-          printerTab.postMessage({ type: 'PRINT_JOB', payload }, '*');
-        } catch(e) {}
-        if (attempts >= 8) clearInterval(send);
-      }, 300);
-    }
-
-    document.getElementById('title').textContent = '✅ Sent!';
-    document.getElementById('msg').textContent = 'Printing now...';
-
-    setTimeout(() => {
-      try { window.close(); } catch(e) {}
-      document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 1500);
-
-  } catch(e) {
-    document.getElementById('title').textContent = '❌ Error';
-    document.getElementById('msg').textContent = e.message;
-  }
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Sending to printer...</title>
-  <style>
-    body { font-family: sans-serif; display:flex; align-items:center;
-           justify-content:center; height:100vh; margin:0; background:#f0f4f8; }
-    .box { text-align:center; background:white; padding:30px 40px;
-           border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
-    p { color:#64748b; margin-top:8px; font-size:14px; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div style="font-size:36px">🖨️</div>
-    <b id="title">Sending to printer...</b>
-    <p id="msg">Please wait</p>
-  </div>
-<script>
-  const PRINTER_URL = 'https://code7509.github.io/scanner/';
-  const STORAGE_KEY = 'jalaram_print_job';
-
-  try {
-    const raw = new URLSearchParams(window.location.search).get('data');
-    if (!raw) throw new Error('No data in URL');
-
-    // ── Method 1: Write to localStorage (printer tab polling will catch it) ──
-    localStorage.setItem(STORAGE_KEY, raw);
-
-    // ── Method 2: Open printer tab with target name & postMessage ────────────
-    // window.open with same target name 'jalaram_printer' will FOCUS existing
-    // tab instead of opening a new one on Android Chro
-    const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
-
-    if (printerTab) {
-      // Wait for printer tab to be ready then postMessage
-      let attempts = 0;
-      const send = setInterval(() => {
-        attempts++;
-        try {
-          printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
-        } catch(e) {}
-        if (attempts >= 5) clearInterval(send);
-      }, 300);
-    }
-
-    document.getElementById('title').textContent = '✅ Sent!';
-    document.getElementById('msg').textContent = 'Printing now...';
-
-    setTimeout(() => {
-      try { window.close(); } catch(e) {}
-      document.getElementById('msg').textContent = 'You can close this tab.';
-    }, 1500);
-
-  } catch(e) {
-    document.getElementById('title').textContent = '❌ Error';
-    document.getElementById('msg').textContent = e.message;
-  }
-</script>
-</body>
 </html>
