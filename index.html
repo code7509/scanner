@@ -157,21 +157,21 @@ if (printChar) {
   await handlePrintJob(e.data.payload);
 });
   // ── Method 2: localStorage storage event
-  window.addEventListener('storage', async (e) => {
-	if (e.key === STORAGE_KEY && e.newValue) {
-		try {
-			await handlePrintJob(JSON.parse(e.newValue));
-		} catch (err) {}
-	}
-});
+//   window.addEventListener('storage', async (e) => {
+// 	if (e.key === STORAGE_KEY && e.newValue) {
+// 		try {
+// 			await handlePrintJob(JSON.parse(e.newValue));
+// 		} catch (err) {}
+// 	}
+// });
   // ── Method 3: Polling every 800ms (most reliable on Android)
-  setInterval(async () => {
-	const raw = localStorage.getItem(STORAGE_KEY);
-	if (!raw) return;
-	try {
-		await handlePrintJob(JSON.parse(raw));
-	} catch (e) {}
-}, 800);
+//   setInterval(async () => {
+// 	const raw = localStorage.getItem(STORAGE_KEY);
+// 	if (!raw) return;
+// 	try {
+// 		await handlePrintJob(JSON.parse(raw));
+// 	} catch (e) {}
+// }, 800);
   // ── On page load
   window.addEventListener('load', () => {
 			const raw = new URLSearchParams(window.location.search).get('data');
