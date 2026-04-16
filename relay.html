@@ -18,64 +18,44 @@
     <p id="msg">Please wait</p>
   </div>
 <script>
-  // const PRINTER_URL = 'https://code7509.github.io/scanner/';
+  const PRINTER_URL = 'https://code7509.github.io/scanner/';
   const STORAGE_KEY = 'jalaram_print_job';
 
   try {
     const raw = new URLSearchParams(window.location.search).get('data');
     if (!raw) throw new Error('No data in URL');
 
-    const parsed = JSON.parse(decodeURIComponent(raw));
-    if (!parsed.header || !parsed.items) throw new Error('Invalid data structure');
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     // ── Method 1: Write to localStorage (printer tab polling will catch it) ──
-   // localStorage.setItem(STORAGE_KEY, raw);
+    localStorage.setItem(STORAGE_KEY, raw);
+
+    // ── Method 2: Open printer tab with target name & postMessage ────────────
+    // window.open with same target name 'jalaram_printer' will FOCUS existing
+    // tab instead of opening a new one on Android Chrome
+    const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
+
+    if (printerTab) {
+      // Wait for printer tab to be ready then postMessage
+      let attempts = 0;
+      const send = setInterval(() => {
+        attempts++;
+        try {
+          printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
+        } catch(e) {}
+        if (attempts >= 5) clearInterval(send);
+      }, 300);
+    }
 
     document.getElementById('title').textContent = '✅ Sent!';
-    document.getElementById('msg').textContent = 'Closing...';
-    window.close();
+    document.getElementById('msg').textContent = 'Printing now...';
 
-    // Close this tab immediately
-    // setTimeout(() => {
-    //   try { 
-    //     window.close(); 
-    //   } catch(e) {}
-      // document.getElementById('msg').textContent = 'You can close this tab.';
-    // }, 500);
+    setTimeout(() => {
+      try { window.close(); } catch(e) {}
+      document.getElementById('msg').textContent = 'You can close this tab.';
+    }, 1500);
 
   } catch(e) {
     document.getElementById('title').textContent = '❌ Error';
     document.getElementById('msg').textContent = e.message;
-    // ── Method 2: Open printer tab with target name & postMessage ────────────
-    // window.open with same target name 'jalaram_printer' will FOCUS existing
-    // tab instead of opening a new one on Android Chrome
-  //   const printerTab = window.open(PRINTER_URL, 'jalaram_printer');
-
-  //   if (printerTab) {
-  //     // Wait for printer tab to be ready then postMessage
-  //     let attempts = 0;
-  //     const send = setInterval(() => {
-  //       attempts++;
-  //       try {
-  //         printerTab.postMessage({ type: 'PRINT_JOB', payload: JSON.parse(raw) }, '*');
-  //       } catch(e) {}
-  //       if (attempts >= 5) clearInterval(send);
-  //     }, 300);
-  //   }
-
-  //   document.getElementById('title').textContent = '✅ Sent!';
-  //   document.getElementById('msg').textContent = 'Printing now...';
-
-  //   // setTimeout(() => {
-  //   //   try { 
-  //       window.close(); 
-  //   //   } catch(e) {}
-  //   //   document.getElementById('msg').textContent = 'You can close this tab.';
-  //   // }, 100);
-
-  // } catch(e) {
-  //   document.getElementById('title').textContent = '❌ Error';
-  //   document.getElementById('msg').textContent = e.message;
   }
 </script>
 </body>
