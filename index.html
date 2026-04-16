@@ -123,30 +123,52 @@ let lastJobId = null; // prevent duplicate print
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
 function flash() {
-	const f = document.getElementById('jobFlash');
-	f.style.display = 'block';
-	f.style.opacity = '1';
-	f.style.transition = 'opacity 1s';
-	setTimeout(() => {
-		f.style.opacity = '0';
-	}, 100);
-	setTimeout(() => {
-		f.style.display = 'none';
-	}, 1100);
+  const f = document.getElementById('jobFlash');
+
+  if (!f) {
+    console.warn("jobFlash element not found");
+    return; // 🛑 prevent crash
+  }
+
+  f.style.display = 'block';
+  f.style.opacity = '1';
+  f.style.transition = 'opacity 1s';
+
+  setTimeout(() => { f.style.opacity = '0'; }, 100);
+  setTimeout(() => { f.style.display = 'none'; }, 1100);
 }
-async function handlePrintJob(job) {
-  const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
-// if (jobId === lastJobId) return;
-lastJobId = jobId;
-flash();
-renderPreview(job);
-// localStorage.removeItem(STORAGE_KEY);
-if (printChar) {
-	await printJob(job);
-} else {
-	pendingJob = job;
-	setStatus('📋 Bill received! Connect printer to print.', 'idle');
-}
+// async function handlePrintJob(job) {
+//   const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
+// // if (jobId === lastJobId) return;
+// lastJobId = jobId;
+// flash();
+// renderPreview(job);
+// // localStorage.removeItem(STORAGE_KEY);
+// if (printChar) {
+// 	await printJob(job);
+// } else {
+// 	pendingJob = job;
+// 	setStatus('📋 Bill received! Connect printer to print.', 'idle');
+// }
+// }
+	async function handlePrintJob(job) {
+  try {
+    flash(); // now safe
+
+    console.log("PRINT JOB ARRIVED", job);
+
+    renderPreview(job);
+
+    if (printChar) {
+      await printJob(job);
+    } else {
+      pendingJob = job;
+      setStatus('📋 Bill received! Connect printer to print.', 'idle');
+    }
+
+  } catch (e) {
+    console.error("Print job error:", e);
+  }
 }
   // ── Method 1: postMessage from relay.html
  window.addEventListener('message', async (e) => {
