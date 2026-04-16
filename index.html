@@ -105,264 +105,127 @@
   <p class="hint">⚠️ Keep this tab open while billing</p>
 
 <script>
-  let printChar      = null;
-  let savedDevice    = null;
-  let pendingJob     = null;
-  let lastJobId      = null;
-  let keepAliveTimer = null;
-  let isPrinting     = false;
-  let isReconnecting = false;
+  let receiptData = null;
 
-  const STORAGE_KEY = 'jalaram_print_job';
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('data');
+    if (raw) {
+      receiptData = JSON.parse(decodeURIComponent(raw));
+      renderPreview(receiptData);
+    } else {
+      // Demo data if no URL params (for testing)
+      receiptData = {
+        header: {
+          billNo: "001",
+          date: new Date().toLocaleDateString('en-IN'),
+          customerName: "Test Customer",
+          mobile: "9999999999",
+          paymentMethod: "Cash"
+        },
+        items: [
+          { name: "Sugar 1kg", qty: 2, price: 45 },
+          { name: "Rice 5kg",  qty: 1, price: 280 }
+        ]
+      };
+      renderPreview(receiptData);
+    }
+  } catch(e) {
+    document.getElementById('receiptPreview').textContent = 'Error loading data: ' + e.message;
+  }
 
-  // ESC/POS init command — safe no-op keepalive (just initializes, no paper movement)
-  const KEEPALIVE_CMD = new Uint8Array([0x1B, 0x40]); // ESC @ = initialize printer
+  function renderPreview(data) {
+    const { header, items } = data;
+    let total = 0;
+    let rows = '';
+
+    items.forEach((item, i) => {
+      const itemTotal = item.qty * item.price;
+      total += itemTotal;
+      rows += `<tr>
+        <td>${i+1}.</td>
+        <td>${item.name}</td>
+        <td>${item.qty} x</td>
+        <td align="center">${item.price}</td>
+        <td align="right"><b>${itemTotal}</b></td>
+      </tr>`;
+    });
+
+    document.getElementById('receiptPreview').innerHTML = `
+      <div style="text-align:center">
+        <b style="font-size:14px">Jalaram Super Store</b><br>
+        Barwala(G)<br>9725792370<br>
+        ----------------------------
+      </div>
+      Bill : ${header.billNo}<br>
+      Date : ${header.date}<hr style="margin:2px 0">
+      Customer : ${header.customerName}<br>
+      Mobile   : ${header.mobile}<br>
+      Payment  : ${header.paymentMethod}
+      <hr style="margin:2px 0">
+      <table>
+        <tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
+        ${rows}
+      </table>
+      <hr style="margin:2px 0">
+      <div style="text-align:right"><b>Total ₹ ${total}</b></div>
+      <hr style="margin:2px 0">
+      <div style="text-align:center">Thank You Visit Again</div>
+    `;
+  }
+
+  // ─── Bluetooth ──────────────────────────────────────────────────────────────
+  let printChar = null;
 
   const PROFILES = [
-    { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
-    { service:'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic:'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f' },
-    { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
+    { service: '000018f0-0000-1000-8000-00805f9b34fb', characteristic: '00002af1-0000-1000-8000-00805f9b34fb', name: 'A' },
+    { service: 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic: 'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f', name: 'B' },
+    { service: '49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic: '49535343-8841-43f4-a8d4-ecbe34729bb3', name: 'C' },
   ];
 
-  // ── Status ───────────────────────────────────────────────────────────────────
-  function setStatus(msg, type='idle', spinner=false) {
-    const b = document.getElementById('statusBox');
-    b.className = 'status-box ' + type;
-    b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
+  function setStatus(msg, type = 'idle') {
+    const box = document.getElementById('statusBox');
+    box.textContent = msg;
+    box.className = 'status-box ' + type;
   }
 
-  // ── Keepalive — write ESC@ every 4s to keep BLE alive on Android ─────────────
-  function startKeepAlive() {
-    stopKeepAlive();
-    keepAliveTimer = setInterval(async () => {
-      // Don't ping while printing — avoid interference
-      if (isPrinting || !printChar) return;
-      if (!savedDevice?.gatt?.connected) {
-        // GATT says disconnected — trigger reconnect
-        onDisconnected();
-        return;
-      }
-      try {
-        await printChar.writeValueWithoutResponse(KEEPALIVE_CMD);
-        // Flash green dot
-        const dot = document.getElementById('ping-dot');
-        dot.style.opacity = '1';
-        setTimeout(() => dot.style.opacity = '0', 400);
-      } catch(e) {
-        // Write failed — connection dropped
-        console.warn('Keepalive write failed:', e.message);
-        onDisconnected();
-      }
-    }, 4000);
-  }
-
-  function stopKeepAlive() {
-    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
-  }
-
-  // ── Check connection is truly alive before printing ──────────────────────────
-  function isConnected() {
-    return printChar !== null && savedDevice?.gatt?.connected === true;
-  }
-
-  // ── Job handler ───────────────────────────────────────────────────────────────
-  async function handlePrintJob(job) {
-    // Deduplicate — same bill won't print twice
-    const jobId = (job.header?.billNo||'') + '|' + (job.header?.date||'') + '|' + (job.items?.length||0);
-    if (jobId === lastJobId) return;
-    lastJobId = jobId;
-
-    localStorage.removeItem(STORAGE_KEY);
-    renderPreview(job);
-
-    if (isConnected()) {
-      await printJob(job);
-    } else {
-      // Save as pending and try to reconnect
-      pendingJob = job;
-      if (savedDevice && !isReconnecting) {
-        setStatus('Reconnecting to printer...', 'loading', true);
-        isReconnecting = true;
-        const ok = await connectToDevice(savedDevice);
-        isReconnecting = false;
-        if (ok) {
-          startKeepAlive();
-          setStatus('✅ Reconnected — Printing...', 'success');
-          await printJob(job);
-          pendingJob = null;
-        } else {
-          setStatus('⚠️ Printer not reachable. Is it ON?', 'error');
-        }
-      } else {
-        setStatus('📋 Bill received! Connect printer to print.', 'idle');
-      }
-    }
-  }
-
-  // ── 3 listeners ──────────────────────────────────────────────────────────────
-
-  // 1. postMessage from relay
-  window.addEventListener('message', async (e) => {
-    if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
-      await handlePrintJob(e.data.payload);
-    }
-  });
-
-  // 2. Storage event
-  window.addEventListener('storage', async (e) => {
-    if (e.key === STORAGE_KEY && e.newValue) {
-      try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
-    }
-  });
-
-  // 3. Polling every 800ms
-  setInterval(async () => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
-  }, 800);
-
-  // ── Page load ─────────────────────────────────────────────────────────────────
-  window.addEventListener('load', () => {
-    const raw = new URLSearchParams(window.location.search).get('data');
-    if (raw) {
-      try {
-        pendingJob = JSON.parse(decodeURIComponent(raw));
-        renderPreview(pendingJob);
-        history.replaceState(null, '', window.location.pathname);
-      } catch(e) {}
-    }
-    localStorage.removeItem(STORAGE_KEY);
-    lastJobId = null;
-  });
-
-  // ── Connect Bluetooth ─────────────────────────────────────────────────────────
   async function connectPrinter() {
     try {
-      setStatus('Scanning...', 'loading', true);
-      document.getElementById('connectBtn').disabled = true;
-
+      setStatus('Scanning for printer...', 'loading');
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: PROFILES.map(p => p.service)
       });
 
-      setStatus('Connecting...', 'loading', true);
-      savedDevice = device;
-      device.addEventListener('gattserverdisconnected', onDisconnected);
+      setStatus('Connecting...', 'loading');
+      const server = await device.gatt.connect();
 
-      const ok = await connectToDevice(device);
-      if (ok) {
-        setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
-        document.getElementById('connectBtn').disabled = false;
-        document.getElementById('forgetBtn').style.display = 'block';
-        startKeepAlive();
-        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
-      } else {
-        setStatus('❌ UUID not matched. Try again.', 'error');
-        document.getElementById('connectBtn').disabled = false;
+      for (const profile of PROFILES) {
+        try {
+          const svc  = await server.getPrimaryService(profile.service);
+          printChar  = await svc.getCharacteristic(profile.characteristic);
+          setStatus(`✅ Connected: ${device.name}`, 'success');
+          document.getElementById('printBtn').disabled = false;
+          return;
+        } catch(e) { /* try next */ }
       }
+
+      setStatus('❌ Printer found but UUID not matched. Contact support.', 'error');
     } catch(e) {
       setStatus('❌ ' + e.message, 'error');
-      document.getElementById('connectBtn').disabled = false;
     }
   }
 
-  async function connectToDevice(device) {
+  async function printReceipt() {
+    if (!printChar || !receiptData) return;
+
+    setStatus('Printing...', 'loading');
     try {
-      const server = await device.gatt.connect();
-      for (const p of PROFILES) {
-        try {
-          const svc = await server.getPrimaryService(p.service);
-          printChar  = await svc.getCharacteristic(p.characteristic);
-          return true;
-        } catch(e) {}
-      }
-    } catch(e) { console.warn('connectToDevice error:', e.message); }
-    printChar = null;
-    return false;
-  }
-
-  // ── Auto reconnect ────────────────────────────────────────────────────────────
-  async function onDisconnected() {
-    if (isReconnecting) return;
-    isReconnecting = true;
-    printChar = null;
-    stopKeepAlive();
-    setStatus('Disconnected. Reconnecting...', 'loading', true);
-
-    for (let i = 0; i < 8; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      if (!savedDevice) break;
-      const ok = await connectToDevice(savedDevice);
-      if (ok) {
-        isReconnecting = false;
-        setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
-        startKeepAlive();
-        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
-        return;
-      }
-    }
-
-    isReconnecting = false;
-    setStatus('⚠️ Could not reconnect. Tap Connect.', 'error');
-    document.getElementById('connectBtn').disabled = false;
-  }
-
-  function forgetPrinter() {
-    stopKeepAlive();
-    if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
-    printChar = savedDevice = null;
-    document.getElementById('forgetBtn').style.display = 'none';
-    setStatus('Forgotten. Connect again.', 'idle');
-  }
-
-  // ── Render preview ────────────────────────────────────────────────────────────
-  function renderPreview(data) {
-    if (!data?.header || !data?.items) return;
-    const { header, items } = data;
-    let total = 0, rows = '';
-    items.forEach((item, i) => {
-      const t = item.qty * item.price; total += t;
-      rows += `<tr>
-        <td>${i+1}.</td><td>${item.name}</td>
-        <td>${item.qty}x</td>
-        <td align="center">${item.price}</td>
-        <td align="right"><b>${t}</b></td></tr>`;
-    });
-    document.getElementById('receiptPreview').innerHTML = `
-      <div style="text-align:center">
-        <b style="font-size:13px">Jalaram Super Store</b><br>
-        Barwala(G)<br>9725792370<br>----------------------------
-      </div>
-      Bill : ${header.billNo}<br>Date : ${header.date}
-      <hr style="margin:2px 0">
-      Customer : ${header.customerName}<br>
-      Mobile   : ${header.mobile}<br>
-      Payment  : ${header.paymentMethod}
-      <hr style="margin:2px 0">
-      <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
-      <hr style="margin:2px 0">
-      <div style="text-align:right"><b>Total ₹ ${total}</b></div>
-      <hr style="margin:2px 0">
-      <div style="text-align:center">Thank You Visit Again</div>`;
-  }
-
-  // ── Print ─────────────────────────────────────────────────────────────────────
-   async function printJob(data) {
-    if (!printChar || isPrinting) return;
-    isPrinting = true;
-    setStatus('Printing...', 'loading', true);
-    try {
-      await sendChunks(buildEscPos(data));
-      setStatus('✅ Printed! Ready for next bill.', 'success');
+      const esc = buildEscPos(receiptData);
+      await sendChunks(esc);
+      setStatus('✅ Printed successfully!', 'success');
     } catch(e) {
       setStatus('❌ Print failed: ' + e.message, 'error');
-      // Store as pending so reconnect can retry
-      pendingJob = data;
-      if (savedDevice) onDisconnected();
-    } finally {
-      isPrinting = false;
     }
   }
 function centerText(text, width) {
