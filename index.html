@@ -136,7 +136,7 @@ function flash() {
 }
 async function handlePrintJob(job) {
   const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
-if (jobId === lastJobId) return;
+// if (jobId === lastJobId) return;
 lastJobId = jobId;
 flash();
 renderPreview(job);
