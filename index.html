@@ -104,6 +104,8 @@
   let savedDevice = null;
   let pendingJob  = null;
   let lastJobId   = null; // prevent duplicate print
+  let keepAliveTimer = null;
+  let isReconnecting = false;
   
   const STORAGE_KEY = 'jalaram_print_job';
   const PROFILES = [
@@ -119,31 +121,62 @@
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
 
-  function flash() {
-    const f = document.getElementById('jobFlash');
-    f.style.display = 'block';
-    f.style.opacity = '1';
-    f.style.transition = 'opacity 1s';
-    setTimeout(() => { f.style.opacity = '0'; }, 100);
-    setTimeout(() => { f.style.display = 'none'; }, 1100);
+  // function flash() {
+  //   const f = document.getElementById('jobFlash');
+  //   f.style.display = 'block';
+  //   f.style.opacity = '1';
+  //   f.style.transition = 'opacity 1s';
+  //   setTimeout(() => { f.style.opacity = '0'; }, 100);
+  //   setTimeout(() => { f.style.display = 'none'; }, 1100);
+  // }
+// ── Keepalive ping — sends empty read every 3s to keep BLE alive ─────────────
+  // Android Chrome drops BLE if no activity for ~5s when tab is in background
+  function startKeepAlive() {
+    stopKeepAlive();
+    keepAliveTimer = setInterval(async () => {
+      if (!printChar || !savedDevice?.gatt?.connected) return;
+      try {
+        // Reading characteristic value is the lightest possible BLE operation
+        await printChar.readValue();
+        // Flash the green dot to show connection is alive
+        const dot = document.getElementById('ping-dot');
+        dot.style.opacity = '1';
+        setTimeout(() => dot.style.opacity = '0', 300);
+      } catch(e) {
+        // Read failed — connection likely dropped
+        console.log('Keepalive failed:', e.message);
+      }
+    }, 3000);
   }
 
+  function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
   // ── Deduplicated job handler ─────────────────────────────────────────────────
   async function handlePrintJob(job) {
-    // Use billNo + date as unique job ID to prevent double prints
-    const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
-    if (jobId === lastJobId) return; // already handled
+    const jobId = (job.header?.billNo||'') + '|' + (job.header?.date||'') + '|' + (job.items?.length||0);
+    if (jobId === lastJobId) return;
     lastJobId = jobId;
 
-    flash();
-    renderPreview(job);
     localStorage.removeItem(STORAGE_KEY);
+    renderPreview(job);
 
-    if (printChar) {
+    if (printChar && savedDevice?.gatt?.connected) {
       await printJob(job);
     } else {
       pendingJob = job;
-      setStatus('📋 Bill received! Connect printer to print.', 'idle');
+      setStatus('📋 Bill received! Reconnecting...', 'loading', true);
+      // Try to reconnect immediately if we have saved device
+      if (savedDevice && !isReconnecting) {
+        const ok = await connectToDevice(savedDevice);
+        if (ok) {
+          setStatus('✅ Reconnected — Printing...', 'success');
+          await printJob(job);
+          pendingJob = null;
+        } else {
+          setStatus('📋 Bill received! Connect printer to print.', 'idle');
+        }
+      }
     }
   }
 
@@ -229,17 +262,25 @@
   }
 
   async function onDisconnected() {
+    if (isReconnecting) return;
+    isReconnecting = true;
     printChar = null;
+    stopKeepAlive();
     setStatus('Disconnected. Reconnecting...', 'loading', true);
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 1500));
       if (!savedDevice) break;
       const ok = await connectToDevice(savedDevice);
       if (ok) {
+        isReconnecting = false;
         setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
+        startKeepAlive(); // ✅ restart keepalive after reconnect
+        // Print pending job if any arrived during disconnect
+        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
         return;
       }
     }
+    isReconnecting = false;
     setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
     document.getElementById('connectBtn').disabled = false;
   }
