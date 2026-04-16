@@ -149,10 +149,12 @@ if (printChar) {
 }
 }
   // ── Method 1: postMessage from relay.html
-  window.addEventListener('message', async (e) => {
-	if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
-		await handlePrintJob(e.data.payload);
-	}
+ window.addEventListener('message', async (e) => {
+  if (!e.data || e.data.type !== 'PRINT_JOB') return;
+
+  console.log("Received print job:", e.data);
+
+  await handlePrintJob(e.data.payload);
 });
   // ── Method 2: localStorage storage event
   window.addEventListener('storage', async (e) => {
@@ -163,13 +165,13 @@ if (printChar) {
 	}
 });
   // ── Method 3: Polling every 800ms (most reliable on Android)
-  window.addEventListener('storage', async (e) => {
-	if (e.key === STORAGE_KEY && e.newValue) {
-		try {
-			await handlePrintJob(JSON.parse(e.newValue));
-		} catch (err) {}
-	}
-});
+  setInterval(async () => {
+	const raw = localStorage.getItem(STORAGE_KEY);
+	if (!raw) return;
+	try {
+		await handlePrintJob(JSON.parse(raw));
+	} catch (e) {}
+}, 800);
   // ── On page load
   window.addEventListener('load', () => {
 			const raw = new URLSearchParams(window.location.search).get('data');
