@@ -350,21 +350,21 @@
 
   // ── Print ─────────────────────────────────────────────────────────────────────
    async function printJob(data) {
-      if (!printChar || isPrinting) return;
-      isPrinting = true;
-      setStatus('Printing...', 'loading', true);
-      try {
-        await sendChunks(buildEscPos(data));
-        setStatus('✅ Printed! Ready for next bill.', 'success');
-      } catch(e) {
-        setStatus('❌ Print failed: ' + e.message, 'error');
-        // Store as pending so reconnect can retry
-        setPendingBtnVisible(true);
-      silentReconnect();
+    if (!printChar || isPrinting) return;
+    isPrinting = true;
+    setStatus('Printing...', 'loading', true);
+    try {
+      await sendChunks(buildEscPos(data));
+      setStatus('✅ Printed! Ready for next bill.', 'success');
+    } catch(e) {
+      setStatus('❌ Print failed: ' + e.message, 'error');
+      // Store as pending so reconnect can retry
+      pendingJob = data;
+      if (savedDevice) onDisconnected();
     } finally {
       isPrinting = false;
     }
-    }
+  }
 function centerText(text, width) {
   text = String(text);
   if (text.length >= width) return text;
