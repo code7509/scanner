@@ -105,6 +105,7 @@
   let pendingJob  = null;
   let lastJobId   = null; // prevent duplicate print
   let keepAliveTimer = null;
+  let isPrinting     = false;
   let isReconnecting = false;
   
   const STORAGE_KEY = 'jalaram_print_job';
@@ -120,37 +121,38 @@
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
-
-  // function flash() {
-  //   const f = document.getElementById('jobFlash');
-  //   f.style.display = 'block';
-  //   f.style.opacity = '1';
-  //   f.style.transition = 'opacity 1s';
-  //   setTimeout(() => { f.style.opacity = '0'; }, 100);
-  //   setTimeout(() => { f.style.display = 'none'; }, 1100);
-  // }
 // ── Keepalive ping — sends empty read every 3s to keep BLE alive ─────────────
   // Android Chrome drops BLE if no activity for ~5s when tab is in background
   function startKeepAlive() {
     stopKeepAlive();
     keepAliveTimer = setInterval(async () => {
-      if (!printChar || !savedDevice?.gatt?.connected) return;
+      // Don't ping while printing — avoid interference
+      if (isPrinting || !printChar) return;
+      if (!savedDevice?.gatt?.connected) {
+        // GATT says disconnected — trigger reconnect
+        onDisconnected();
+        return;
+      }
       try {
-        // Reading characteristic value is the lightest possible BLE operation
-        await printChar.readValue();
-        // Flash the green dot to show connection is alive
+        await printChar.writeValueWithoutResponse(KEEPALIVE_CMD);
+        // Flash green dot
         const dot = document.getElementById('ping-dot');
         dot.style.opacity = '1';
-        setTimeout(() => dot.style.opacity = '0', 300);
+        setTimeout(() => dot.style.opacity = '0', 400);
       } catch(e) {
-        // Read failed — connection likely dropped
-        console.log('Keepalive failed:', e.message);
+        // Write failed — connection dropped
+        console.warn('Keepalive write failed:', e.message);
+        onDisconnected();
       }
-    }, 3000);
+    }, 4000);
   }
 
   function stopKeepAlive() {
     if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
+  // ── Check connection is truly alive before printing ──────────────────────────
+  function isConnected() {
+    return printChar !== null && savedDevice?.gatt?.connected === true;
   }
   // ── Deduplicated job handler ─────────────────────────────────────────────────
   async function handlePrintJob(job) {
@@ -161,25 +163,29 @@
     localStorage.removeItem(STORAGE_KEY);
     renderPreview(job);
 
-    if (printChar && savedDevice?.gatt?.connected) {
-      await printJob(job);
-    } else {
-      pendingJob = job;
-      setStatus('📋 Bill received! Reconnecting...', 'loading', true);
-      // Try to reconnect immediately if we have saved device
-      if (savedDevice && !isReconnecting) {
-        const ok = await connectToDevice(savedDevice);
-        if (ok) {
-          setStatus('✅ Reconnected — Printing...', 'success');
-          await printJob(job);
-          pendingJob = null;
+     if (isConnected()) {
+        await printJob(job);
+      } else {
+        // Save as pending and try to reconnect
+        pendingJob = job;
+        if (savedDevice && !isReconnecting) {
+          setStatus('Reconnecting to printer...', 'loading', true);
+          isReconnecting = true;
+          const ok = await connectToDevice(savedDevice);
+          isReconnecting = false;
+          if (ok) {
+            startKeepAlive();
+            setStatus('✅ Reconnected — Printing...', 'success');
+            await printJob(job);
+            pendingJob = null;
+          } else {
+            setStatus('⚠️ Printer not reachable. Is it ON?', 'error');
+          }
         } else {
           setStatus('📋 Bill received! Connect printer to print.', 'idle');
         }
       }
     }
-  }
-
   // ── Method 1: postMessage from relay.html ────────────────────────────────────
   window.addEventListener('message', async (e) => {
     if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
@@ -235,7 +241,7 @@
       if (ok) {
         setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
         document.getElementById('connectBtn').disabled = false;
-        document.getElementById('forgetBtn').style.display = 'block';
+        document.getElementById('forgetBtn').style.display = 'block';  
         if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
       } else {
         setStatus('❌ UUID not matched. Try again.', 'error');
@@ -257,7 +263,8 @@
           return true;
         } catch(e) {}
       }
-    } catch(e) {}
+    } catch(e) { console.warn('connectToDevice error:', e.message); }
+     printChar = null;
     return false;
   }
 
@@ -268,7 +275,7 @@
     stopKeepAlive();
     setStatus('Disconnected. Reconnecting...', 'loading', true);
     for (let i = 0; i < 10; i++) {
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2000));
       if (!savedDevice) break;
       const ok = await connectToDevice(savedDevice);
       if (ok) {
@@ -286,6 +293,7 @@
   }
 
   function forgetPrinter() {
+    stopKeepAlive();
     if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
     printChar = savedDevice = null;
     document.getElementById('forgetBtn').style.display = 'none';
@@ -324,16 +332,22 @@
   }
 
   // ── Print ─────────────────────────────────────────────────────────────────────
-  async function printJob(data) {
-    if (!printChar) return;
-    setStatus('Printing...', 'loading', true);
-    try {
-      await sendChunks(buildEscPos(data));
-      setStatus('✅ Printed! Ready for next bill.', 'success');
-    } catch(e) {
-      setStatus('❌ Print failed: ' + e.message, 'error');
+   async function printJob(data) {
+      if (!printChar || isPrinting) return;
+      isPrinting = true;
+      setStatus('Printing...', 'loading', true);
+      try {
+        await sendChunks(buildEscPos(data));
+        setStatus('✅ Printed! Ready for next bill.', 'success');
+      } catch(e) {
+        setStatus('❌ Print failed: ' + e.message, 'error');
+        // Store as pending so reconnect can retry
+        pendingJob = data;
+        if (savedDevice) onDisconnected();
+      } finally {
+        isPrinting = false;
+      }
     }
-  }
 function centerText(text, width) {
   text = String(text);
   if (text.length >= width) return text;
