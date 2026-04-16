@@ -121,6 +121,9 @@
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
+  function setPendingBtnVisible(visible) {
+    document.getElementById('printPendingBtn').style.display = visible ? 'block' : 'none';
+  }
 // ── Keepalive ping — sends empty read every 3s to keep BLE alive ─────────────
   // Android Chrome drops BLE if no activity for ~5s when tab is in background
   function startKeepAlive() {
@@ -144,7 +147,7 @@
         console.warn('Keepalive write failed:', e.message);
         onDisconnected();
       }
-    }, 4000);
+    }, 1000);
   }
 
   function stopKeepAlive() {
@@ -154,9 +157,13 @@
   function isConnected() {
     return printChar !== null && savedDevice?.gatt?.connected === true;
   }
+   // ── Build a stable job ID ────────────────────────────────────────────────────
+  function makeJobId(job) {
+    return (job?.header?.billNo||'') + '|' + (job?.header?.date||'') + '|' + (job?.items?.length||0);
+  }
   // ── Deduplicated job handler ─────────────────────────────────────────────────
   async function handlePrintJob(job) {
-    const jobId = (job.header?.billNo||'') + '|' + (job.header?.date||'') + '|' + (job.items?.length||0);
+    const jobId = makeJobId(job);
     if (jobId === lastJobId) return;
     lastJobId = jobId;
 
@@ -164,28 +171,49 @@
     renderPreview(job);
 
      if (isConnected()) {
+       setPendingBtnVisible(false);
         await printJob(job);
       } else {
         // Save as pending and try to reconnect
         pendingJob = job;
         if (savedDevice && !isReconnecting) {
           setStatus('Reconnecting to printer...', 'loading', true);
+          setPendingBtnVisible(false);
           isReconnecting = true;
           const ok = await connectToDevice(savedDevice);
           isReconnecting = false;
           if (ok) {
             startKeepAlive();
             setStatus('✅ Reconnected — Printing...', 'success');
-            await printJob(job);
+            await printJob(pendingJob);
             pendingJob = null;
+          setPendingBtnVisible(false);
           } else {
             setStatus('⚠️ Printer not reachable. Is it ON?', 'error');
+            setPendingBtnVisible(true);
           }
         } else {
           setStatus('📋 Bill received! Connect printer to print.', 'idle');
+          setPendingBtnVisible(true);
         }
       }
     }
+    // ── Manual print of pending bill ─────────────────────────────────────────────
+  async function printPendingNow() {
+    if (!pendingJob) {
+      setStatus('No pending bill found.', 'idle');
+      setPendingBtnVisible(false);
+      return;
+    }
+    if (!isConnected()) {
+      setStatus('❌ Printer not connected. Connect first.', 'error');
+      return;
+    }
+    const job = pendingJob;
+    pendingJob = null;
+    setPendingBtnVisible(false);
+    await printJob(job);
+  }
   // ── Method 1: postMessage from relay.html ────────────────────────────────────
   window.addEventListener('message', async (e) => {
     if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
@@ -212,8 +240,12 @@
     const raw = new URLSearchParams(window.location.search).get('data');
     if (raw) {
       try {
-        pendingJob = JSON.parse(decodeURIComponent(raw));
-        renderPreview(pendingJob);
+        const job = JSON.parse(decodeURIComponent(raw));
+        renderPreview(job);
+        pendingJob = job;
+        lastJobId = makeJobId(job);
+        setStatus('📋 Bill ready. Connect printer then tap Print.', 'pending');
+        setPendingBtnVisible(true);
         history.replaceState(null, '', window.location.pathname);
       } catch(e) {}
     }
@@ -223,7 +255,7 @@
   });
 
   // ── Connect Bluetooth ─────────────────────────────────────────────────────────
-  async function connectPrinter() {
+async function connectPrinter() {
     try {
       setStatus('Scanning...', 'loading', true);
       document.getElementById('connectBtn').disabled = true;
@@ -239,10 +271,20 @@
 
       const ok = await connectToDevice(device);
       if (ok) {
-        setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
         document.getElementById('connectBtn').disabled = false;
-        document.getElementById('forgetBtn').style.display = 'block';  
-        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
+        document.getElementById('forgetBtn').style.display = 'block';
+        startKeepAlive();
+
+        // If there's a pending job, print it immediately
+        if (pendingJob) {
+          setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Printing now...', 'success');
+          setPendingBtnVisible(false);
+          const job = pendingJob;
+          pendingJob = null;
+          await printJob(job);
+        } else {
+          setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
+        }
       } else {
         setStatus('❌ UUID not matched. Try again.', 'error');
         document.getElementById('connectBtn').disabled = false;
@@ -283,13 +325,18 @@
         setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
         startKeepAlive(); // ✅ restart keepalive after reconnect
         // Print pending job if any arrived during disconnect
-        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
+        if (pendingJob) { 
+          await printJob(pendingJob); pendingJob = null;
+         setPendingBtnVisible(false);
+          await printJob(job);
+        }
         return;
       }
     }
     isReconnecting = false;
     setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
     document.getElementById('connectBtn').disabled = false;
+    if (pendingJob) setPendingBtnVisible(true);
   }
 
   function forgetPrinter() {
