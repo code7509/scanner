@@ -37,6 +37,7 @@
     .status-box.success { background: #dcfce7; color: #16a34a; }
     .status-box.error   { background: #fee2e2; color: #dc2626; }
     .status-box.loading { background: #dbeafe; color: #2563eb; }
+    .status-box.pending { background: #fef9c3; color: #854d0e; }
     button {
       width: 100%;
       padding: 11px;
@@ -50,6 +51,7 @@
     }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     #connectBtn { background: #2563eb; color: white; }
+    #printPendingBtn { background: #f59e0b; color: white; display: none; }
     #forgetBtn  { background: #e2e8f0; color: #475569; font-size:12px; padding:7px; display:none; }
     .spinner {
       display: inline-block;
@@ -76,24 +78,27 @@
     #receiptPreview table { width: 100%; border-collapse: collapse; }
     #receiptPreview td, #receiptPreview th { padding: 2px 3px; }
     .hint { font-size:12px; color:#94a3b8; text-align:center; margin-top:10px; }
-    #jobFlash {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(22,163,74,0.15);
-      pointer-events: none;
+    #ping-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      margin-left: 6px;
+      vertical-align: middle;
+      opacity: 0;
+      transition: opacity 0.3s;
     }
   </style>
 </head>
 <body>
 
-  <div id="jobFlash"></div>
-  <h2>🖨️ Jalaram Super Store — Printer</h2>
+  <h2>🖨️ Jalaram Printer <span id="ping-dot" title="Connection alive"></span></h2>
 
   <div class="card">
     <div id="statusBox" class="status-box idle">Not connected</div>
     <button id="connectBtn" onclick="connectPrinter()">🔗 Connect Bluetooth Printer</button>
-    <button id="forgetBtn" onclick="forgetPrinter()">🗑️ Forget & Disconnect</button>
+    <button id="printPendingBtn" onclick="printPendingNow()">🖨️ Print Pending Bill</button>
+    <button id="forgetBtn" onclick="forgetPrinter()">🗑️ Forget &amp; Disconnect</button>
   </div>
 
   <div id="receiptPreview">Waiting for receipt from billing app...</div>
@@ -107,8 +112,10 @@
   let keepAliveTimer = null;
   let isPrinting     = false;
   let isReconnecting = false;
+  let userConnected  = false; 
   
   const STORAGE_KEY = 'jalaram_print_job';
+  const PING_CMD = new Uint8Array([0x10]);
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
     { service:'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic:'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f' },
@@ -124,42 +131,89 @@
   function setPendingBtnVisible(visible) {
     document.getElementById('printPendingBtn').style.display = visible ? 'block' : 'none';
   }
+    function makeJobId(job) {
+    return (job?.header?.billNo||'') + '|' + (job?.header?.date||'') + '|' + (job?.items?.length||0);
+  }
+
+  function isConnected() {
+    return printChar !== null && savedDevice?.gatt?.connected === true;
+  }
+
+  function flashDot() {
+    const dot = document.getElementById('ping-dot');
+    dot.style.opacity = '1';
+    setTimeout(() => dot.style.opacity = '0', 400);
+  }
 // ── Keepalive ping — sends empty read every 3s to keep BLE alive ─────────────
   // Android Chrome drops BLE if no activity for ~5s when tab is in background
   function startKeepAlive() {
     stopKeepAlive();
     keepAliveTimer = setInterval(async () => {
       // Don't ping while printing — avoid interference
-      if (isPrinting || !printChar) return;
+      if (isPrinting || !userConnected) return;
       if (!savedDevice?.gatt?.connected) {
         // GATT says disconnected — trigger reconnect
-        onDisconnected();
+        silentReconnect();
         return;
       }
       try {
-        await printChar.writeValueWithoutResponse(KEEPALIVE_CMD);
+        await printChar.writeValueWithoutResponse(PING_CMD);
         // Flash green dot
-        const dot = document.getElementById('ping-dot');
-        dot.style.opacity = '1';
-        setTimeout(() => dot.style.opacity = '0', 400);
+        flashDot();
       } catch(e) {
         // Write failed — connection dropped
         console.warn('Keepalive write failed:', e.message);
-        onDisconnected();
+        silentReconnect();
       }
-    }, 1000);
+    }, 3000);
   }
 
   function stopKeepAlive() {
     if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
   }
-  // ── Check connection is truly alive before printing ──────────────────────────
-  function isConnected() {
-    return printChar !== null && savedDevice?.gatt?.connected === true;
+ // ── Silent background reconnect ───────────────────────────────────────────────
+  // User NEVER sees "Disconnected / Reconnecting" — we fix it invisibly.
+  // Only after ALL retries fail do we tell the user.
+  async function silentReconnect() {
+    if (isReconnecting || !savedDevice || !userConnected) return;
+    isReconnecting = true;
+    printChar = null;
+    stopKeepAlive();
+
+    // Keep showing the green "Connected" status during background repair
+    // so the screen doesn't alarm the user
+
+    let ok = false;
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, i === 0 ? 800 : 2000));
+      if (!savedDevice) break;
+      ok = await connectToDevice(savedDevice);
+      if (ok) break;
+    }
+
+    isReconnecting = false;
+
+    if (ok) {
+      startKeepAlive();
+      // Quietly restore status — user sees "Ready" as if nothing happened
+      setStatus('✅ Connected: ' + (savedDevice.name || 'Printer') + ' — Ready!', 'success');
+      if (pendingJob) {
+        const job = pendingJob; pendingJob = null;
+        setPendingBtnVisible(false);
+        await printJob(job);
+      }
+    } else {
+      // Printer is genuinely unreachable — now tell the user
+      setStatus('⚠️ Printer out of range. Move closer & tap Connect.', 'error');
+      if (pendingJob) setPendingBtnVisible(true);
+    }
   }
-   // ── Build a stable job ID ────────────────────────────────────────────────────
-  function makeJobId(job) {
-    return (job?.header?.billNo||'') + '|' + (job?.header?.date||'') + '|' + (job?.items?.length||0);
+
+  // ── GATT disconnect event → trigger silent reconnect, never show "Disconnected" ─
+  function onDisconnected() {
+    if (!userConnected) return;
+    printChar = null;
+    silentReconnect(); // invisible repair
   }
   // ── Deduplicated job handler ─────────────────────────────────────────────────
   async function handlePrintJob(job) {
@@ -175,53 +229,39 @@
         await printJob(job);
       } else {
         // Save as pending and try to reconnect
-        pendingJob = job;
-        if (savedDevice && !isReconnecting) {
-          setStatus('Reconnecting to printer...', 'loading', true);
-          setPendingBtnVisible(false);
-          isReconnecting = true;
-          const ok = await connectToDevice(savedDevice);
-          isReconnecting = false;
-          if (ok) {
-            startKeepAlive();
-            setStatus('✅ Reconnected — Printing...', 'success');
-            await printJob(pendingJob);
-            pendingJob = null;
-          setPendingBtnVisible(false);
-          } else {
-            setStatus('⚠️ Printer not reachable. Is it ON?', 'error');
-            setPendingBtnVisible(true);
-          }
-        } else {
-          setStatus('📋 Bill received! Connect printer to print.', 'idle');
-          setPendingBtnVisible(true);
-        }
+        if (userConnected && savedDevice) {
+        // Background reconnect is already running (or we trigger it)
+        // The job will auto-print once reconnected
+        if (!isReconnecting) silentReconnect();
+        // Keep status as-is (likely still "Connected") so user isn't alarmed
+      } else {
+        setStatus('📋 Bill ready. Connect printer then tap Print.', 'pending');
+        setPendingBtnVisible(true);
       }
     }
-    // ── Manual print of pending bill ─────────────────────────────────────────────
-  async function printPendingNow() {
-    if (!pendingJob) {
-      setStatus('No pending bill found.', 'idle');
-      setPendingBtnVisible(false);
-      return;
-    }
-    if (!isConnected()) {
-      setStatus('❌ Printer not connected. Connect first.', 'error');
-      return;
-    }
-    const job = pendingJob;
-    pendingJob = null;
+  }
+ async function printPendingNow() {
+    if (!pendingJob) { setStatus('No pending bill.', 'idle'); setPendingBtnVisible(false); return; }
+    if (!isConnected()) { setStatus('❌ Not connected. Connect first.', 'error'); return; }
+    const job = pendingJob; pendingJob = null;
     setPendingBtnVisible(false);
     await printJob(job);
   }
-  // ── Method 1: postMessage from relay.html ────────────────────────────────────
+   // 1. BroadcastChannel (same origin, instant)
+  try {
+    const bc = new BroadcastChannel('jalaram_print');
+    bc.onmessage = async (e) => {
+      if (e.data?.type === 'PRINT_JOB' && e.data?.payload) await handlePrintJob(e.data.payload);
+    };
+  } catch(e) {}
+  // ── 2. postMessage from relay tab
   window.addEventListener('message', async (e) => {
     if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
       await handlePrintJob(e.data.payload);
     }
   });
 
-  // ── Method 2: localStorage storage event ────────────────────────────────────
+  // ── Method 3: localStorage storage event ────────────────────────────────────
   window.addEventListener('storage', async (e) => {
     if (e.key === STORAGE_KEY && e.newValue) {
       try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
@@ -234,7 +274,12 @@
     if (!raw) return;
     try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
   }, 800);
-
+// 5. On tab focus — immediately check connection, reconnect if needed
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && userConnected) {
+      if (!isConnected() && !isReconnecting) silentReconnect();
+    }
+  });
   // ── On page load ─────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
     const raw = new URLSearchParams(window.location.search).get('data');
@@ -251,7 +296,7 @@
     }
     // Clear stale job
     localStorage.removeItem(STORAGE_KEY);
-    lastJobId = null;
+    // lastJobId = null;
   });
 
   // ── Connect Bluetooth ─────────────────────────────────────────────────────────
@@ -271,6 +316,7 @@ async function connectPrinter() {
 
       const ok = await connectToDevice(device);
       if (ok) {
+        userConnected = true;
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('forgetBtn').style.display = 'block';
         startKeepAlive();
@@ -310,34 +356,34 @@ async function connectPrinter() {
     return false;
   }
 
-  async function onDisconnected() {
-    if (isReconnecting) return;
-    isReconnecting = true;
-    printChar = null;
-    stopKeepAlive();
-    setStatus('Disconnected. Reconnecting...', 'loading', true);
-    for (let i = 0; i < 10; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      if (!savedDevice) break;
-      const ok = await connectToDevice(savedDevice);
-      if (ok) {
-        isReconnecting = false;
-        setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
-        startKeepAlive(); // ✅ restart keepalive after reconnect
-        // Print pending job if any arrived during disconnect
-        if (pendingJob) { 
-          await printJob(pendingJob); pendingJob = null;
-         setPendingBtnVisible(false);
-          await printJob(job);
-        }
-        return;
-      }
-    }
-    isReconnecting = false;
-    setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
-    document.getElementById('connectBtn').disabled = false;
-    if (pendingJob) setPendingBtnVisible(true);
-  }
+  // async function onDisconnected() {
+  //   if (isReconnecting) return;
+  //   isReconnecting = true;
+  //   printChar = null;
+  //   stopKeepAlive();
+  //   setStatus('Disconnected. Reconnecting...', 'loading', true);
+  //   for (let i = 0; i < 10; i++) {
+  //     await new Promise(r => setTimeout(r, 2000));
+  //     if (!savedDevice) break;
+  //     const ok = await connectToDevice(savedDevice);
+  //     if (ok) {
+  //       isReconnecting = false;
+  //       setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
+  //       startKeepAlive(); // ✅ restart keepalive after reconnect
+  //       // Print pending job if any arrived during disconnect
+  //       if (pendingJob) { 
+  //         await printJob(pendingJob); pendingJob = null;
+  //        setPendingBtnVisible(false);
+  //         await printJob(job);
+  //       }
+  //       return;
+  //     }
+  //   }
+  //   isReconnecting = false;
+  //   setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
+  //   document.getElementById('connectBtn').disabled = false;
+  //   if (pendingJob) setPendingBtnVisible(true);
+  // }
 
   function forgetPrinter() {
     stopKeepAlive();
@@ -389,11 +435,11 @@ async function connectPrinter() {
       } catch(e) {
         setStatus('❌ Print failed: ' + e.message, 'error');
         // Store as pending so reconnect can retry
-        pendingJob = data;
-        if (savedDevice) onDisconnected();
-      } finally {
-        isPrinting = false;
-      }
+        setPendingBtnVisible(true);
+      silentReconnect();
+    } finally {
+      isPrinting = false;
+    }
     }
 function centerText(text, width) {
   text = String(text);
