@@ -315,30 +315,13 @@ async function onDisconnected() {
   async function printJob(data) {
 	if (!printChar) return;
 	setStatus('Printing...', 'loading', true);
-	   try {
-    // 🔥 IMPORTANT: let printer settle
-    await new Promise(r => setTimeout(r, 300));
-
-    // await sendChunks(buildEscPos(data));
-const full = buildEscPos(data);
-
-// split into 2 parts
-const mid = Math.floor(full.length / 2);
-
-await sendChunks(full.slice(0, mid));
-await new Promise(r => setTimeout(r, 300)); // pause
-await sendChunks(full.slice(mid));
-    setStatus('✅ Printed! Ready for next bill.', 'success');
-
-  } catch (e) {
-    setStatus('❌ Print failed: ' + e.message, 'error');
-  }
-	// try {
-	// 	await sendChunks(buildEscPos(data));
-	// 	setStatus('✅ Printed! Ready for next bill.', 'success');
-	// } catch (e) {
-	// 	setStatus('❌ Print failed: ' + e.message, 'error');
-	// }
+	   
+	try {
+		await sendChunks(buildEscPos(data));
+		setStatus('✅ Printed! Ready for next bill.', 'success');
+	} catch (e) {
+		setStatus('❌ Print failed: ' + e.message, 'error');
+	}
 }
 function centerText(text, width) {
   text = String(text);
@@ -411,23 +394,14 @@ t += index + line1Name + qty + rate + tot + '\n';
   }
 
   async function sendChunks(data) {
-	const chunkSize = 40;   // 🔥 smaller chunk
-  	const delay = 120;       // 🔥 more delay
-    for (let i = 0; i < data.length; i += chunkSize) {
-		const chunk = data.slice(i, i + chunkSize);
-		try{
-	    if (printChar.writeValueWithoutResponse) {
-		  await printChar.writeValueWithoutResponse(chunk);
-		} else {
-		  await printChar.writeValue(chunk);
-		}
-		}catch(e){
-			console.error("Chunk write failed:", e);
-      		throw e;
-		}
-	    await new Promise(r => setTimeout(r, delay));
-      // await printChar.writeValue(data.slice(i, i+100));
-      // await new Promise(r => setTimeout(r, 50));
+    const CHUNK_SIZE = 20; // ✅ very small chunks — most stable for BLE thermal printers
+    const DELAY_MS   = 100; // ✅ 100ms gap — gives printer time to process each chunk
+
+    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+      if (!printChar) throw new Error('Printer disconnected mid-print');
+      const chunk = data.slice(i, i + CHUNK_SIZE);
+      await printChar.writeValue(chunk); // writeValue waits for ACK — most reliable
+      await new Promise(r => setTimeout(r, DELAY_MS));
     }
   }
 </script>
