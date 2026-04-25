@@ -394,10 +394,14 @@ t += index + line1Name + qty + rate + tot + '\n';
 
   async function sendChunks(data) {
 	const chunkSize = 80;   // 🔥 smaller chunk
-  	const delay = 80;       // 🔥 more delay
+  	const delay = 200;       // 🔥 more delay
     for (let i = 0; i < data.length; i += chunkSize) {
 		const chunk = data.slice(i, i + chunkSize);
-	    await printChar.writeValue(chunk);
+	    if (printChar.writeValueWithoutResponse) {
+		  await printChar.writeValueWithoutResponse(chunk);
+		} else {
+		  await printChar.writeValue(chunk);
+		}
 	    await new Promise(r => setTimeout(r, delay));
       // await printChar.writeValue(data.slice(i, i+100));
       // await new Promise(r => setTimeout(r, 50));
