@@ -106,10 +106,232 @@
   <p class="hint">⚠️ Keep this tab open while billing</p>
 
 <script>
-let printChar = null; 
-let savedDevice = null;
-let pendingJob = null; 
-let lastJobId = null; // prevent duplicate print
+// let printChar = null; 
+// let savedDevice = null;
+// let pendingJob = null; 
+// let lastJobId = null; // prevent duplicate print
+
+//   const PROFILES = [
+//     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
+//     { service:'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic:'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f' },
+//     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
+//   ];
+
+//   // ── Status helper ───────────────────────────────────────────────────────────
+//   function setStatus(msg, type='idle', spinner=false) {
+//     const b = document.getElementById('statusBox');
+//     b.className = 'status-box ' + type;
+//     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
+//   }
+// function flash() {
+//   const f = document.getElementById('jobFlash');
+
+//   if (!f) {
+//     console.warn("jobFlash element not found");
+//     return; // 🛑 prevent crash
+//   }
+
+//   f.style.display = 'block';
+//   f.style.opacity = '1';
+//   f.style.transition = 'opacity 1s';
+
+//   setTimeout(() => { f.style.opacity = '0'; }, 100);
+//   setTimeout(() => { f.style.display = 'none'; }, 1100);
+// }
+// // async function handlePrintJob(job) {
+// //   const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
+// // // if (jobId === lastJobId) return;
+// // lastJobId = jobId;
+// // flash();
+// // renderPreview(job);
+// // // localStorage.removeItem(STORAGE_KEY);
+// // if (printChar) {
+// // 	await printJob(job);
+// // } else {
+// // 	pendingJob = job;
+// // 	setStatus('📋 Bill received! Connect printer to print.', 'idle');
+// // }
+// // }
+// 	async function handlePrintJob(job) {
+//   try {
+//     flash(); // now safe
+
+//     console.log("PRINT JOB ARRIVED", job);
+
+//     renderPreview(job);
+
+//     if (printChar) {
+//       await printJob(job);
+//     } else {
+//       pendingJob = job;
+//       setStatus('📋 Bill received! Connect printer to print.', 'idle');
+//     }
+
+//   } catch (e) {
+//     console.error("Print job error:", e);
+//   }
+// }
+//   // ── Method 1: postMessage from relay.html
+//  window.addEventListener('message', async (e) => {
+//   if (!e.data || e.data.type !== 'PRINT_JOB') return;
+
+//   console.log("Received print job:", e.data);
+
+//   await handlePrintJob(e.data.payload);
+// });
+//   // ── Method 2: localStorage storage event
+// //   window.addEventListener('storage', async (e) => {
+// // 	if (e.key === STORAGE_KEY && e.newValue) {
+// // 		try {
+// // 			await handlePrintJob(JSON.parse(e.newValue));
+// // 		} catch (err) {}
+// // 	}
+// // });
+//   // ── Method 3: Polling every 800ms (most reliable on Android)
+// //   setInterval(async () => {
+// // 	const raw = localStorage.getItem(STORAGE_KEY);
+// // 	if (!raw) return;
+// // 	try {
+// // 		await handlePrintJob(JSON.parse(raw));
+// // 	} catch (e) {}
+// // }, 800);
+//   // ── On page load
+//   window.addEventListener('load', () => {
+// 			const raw = new URLSearchParams(window.location.search).get('data');
+// 			if (raw) {
+// 				try {
+// 					pendingJob = JSON.parse(decodeURIComponent(raw));
+// 					renderPreview(pendingJob);
+// 					history.replaceState(null, '', window.location.pathname);
+// 				} catch (e) {}
+// 			}
+//     // Clear stale job
+//     // localStorage.removeItem(STORAGE_KEY); 
+//     lastJobId = null;
+//   });
+//   // ── Connect Bluetooth
+// async function connectPrinter() {
+// 	try {
+// 		setStatus('Scanning...', 'loading', true);
+// 		document.getElementById('connectBtn').disabled = true;
+// 		const device = await navigator.bluetooth.requestDevice({
+// 			acceptAllDevices: true,
+// 			optionalServices: PROFILES.map(p => p.service)
+// 		});
+// 		setStatus('Connecting...', 'loading', true);
+// 		savedDevice = device;
+// 		device.addEventListener('gattserverdisconnected', onDisconnected);
+// 		const ok = await connectToDevice(device);
+// 		if (ok) {
+// 			setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
+// 			document.getElementById('connectBtn').disabled = false;
+// 			document.getElementById('forgetBtn').style.display = 'block';
+// 			if (pendingJob) {
+// 				await printJob(pendingJob);
+// 				pendingJob = null;
+// 			}
+// 		} else {
+// 			setStatus('❌ UUID not matched. Try again.', 'error');
+// 			document.getElementById('connectBtn').disabled = false;
+// 		}
+// 	} catch (e) {
+// 		setStatus('❌ ' + e.message, 'error');
+// 		document.getElementById('connectBtn').disabled = false;
+// 	}
+// }
+  
+// async function connectToDevice(device) {
+// 	try {
+// 		const server = await device.gatt.connect();
+// 		for (const p of PROFILES) {
+// 			try {
+// 				const svc = await server.getPrimaryService(p.service);
+// 				printChar = await svc.getCharacteristic(p.characteristic);
+// 				return true;
+// 			} catch (e) {}
+// 		}
+// 	} catch (e) {}
+// 	return false;
+// }
+// async function onDisconnected() {
+// 	printChar = null;
+// 	setStatus('Disconnected. Reconnecting...', 'loading', true);
+// 	for (let i = 0; i < 10; i++) {
+// 		await new Promise(r => setTimeout(r, 1500));
+// 		if (!savedDevice) break;
+// 		const ok = await connectToDevice(savedDevice);
+// 		if (ok) {
+// 			setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
+// 			return;
+// 		}
+// 	}
+// 	setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
+// 	document.getElementById('connectBtn').disabled = false;
+// }
+//   function forgetPrinter() {
+// 	if (savedDevice) try {
+// 		savedDevice.gatt.disconnect();
+// 	} catch (e) {}
+// 	printChar = savedDevice = null;
+// 	document.getElementById('forgetBtn').style.display = 'none';
+// 	setStatus('Forgotten. Connect again.', 'idle');
+// }
+ 
+
+
+//   // ── Forget printer ──────────────────────────────────────────────────────────
+//   function forgetPrinter() {
+//     if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
+//     printChar = savedDevice = null;
+//     document.getElementById('printBtn').disabled = true;
+//     document.getElementById('forgetBtn').style.display = 'none';
+//     setStatus('Printer forgotten.', 'idle');
+//   }
+
+//   // ── Render receipt preview ──────────────────────────────────────────────────
+//   function renderPreview(data) {
+//     const { header, items } = data;
+//     let total = 0, rows = '';
+//     items.forEach((item, i) => {
+//       const t = item.qty * item.price; total += t;
+//       rows += `<tr><td>${i+1}.</td><td>${item.name}</td><td>${item.qty}x</td>
+//                <td align="center">${item.price}</td><td align="right"><b>${t}</b></td></tr>`;
+//     });
+//     document.getElementById('receiptPreview').innerHTML = `
+//       <div style="text-align:center"><b style="font-size:14px">Jalaram Super Store</b><br>
+//         Barwala(G)<br>9725792370<br>----------------------------</div>
+//       Bill : ${header.billNo}<br>Date : ${header.date}
+//       <hr style="margin:2px 0">
+//       Customer : ${header.customerName}<br>Mobile : ${header.mobile}<br>Payment : ${header.paymentMethod}
+//       <hr style="margin:2px 0">
+//       <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
+//       <hr style="margin:2px 0">
+//       <div style="text-align:right"><b>Total ₹ ${total}</b></div>
+//       <hr style="margin:2px 0">
+//       <div style="text-align:center">Thank You Visit Again</div>`;
+//   }
+
+//   // ── Print ───────────────────────────────────────────────────────────────────
+//   async function printJob(data) {
+// 	if (!printChar) return;
+// 	setStatus('Printing...', 'loading', true);
+	   
+// 	try {
+// 		await sendChunks(buildEscPos(data));
+// 		setStatus('✅ Printed! Ready for next bill.', 'success');
+// 	} catch (e) {
+// 		setStatus('❌ Print failed: ' + e.message, 'error');
+// 	}
+// }
+	let printChar      = null;
+  let savedDevice    = null;
+  let pendingJob     = null;
+  let lastJobId      = null;
+  let isPrinting     = false;
+  let isReconnecting = false;
+  let keepAliveTimer = null;
+
+  const STORAGE_KEY = 'jalaram_print_job';
 
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
@@ -117,192 +339,208 @@ let lastJobId = null; // prevent duplicate print
     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
   ];
 
-  // ── Status helper ───────────────────────────────────────────────────────────
+  // ── Status ───────────────────────────────────────────────────────────────────
   function setStatus(msg, type='idle', spinner=false) {
     const b = document.getElementById('statusBox');
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
-function flash() {
-  const f = document.getElementById('jobFlash');
 
-  if (!f) {
-    console.warn("jobFlash element not found");
-    return; // 🛑 prevent crash
+  // ── Keepalive: send ESC @ every 5s to prevent Android BLE suspend ────────────
+  function startKeepAlive() {
+    stopKeepAlive();
+    keepAliveTimer = setInterval(async () => {
+      if (isPrinting || !printChar || !savedDevice?.gatt?.connected) return;
+      try {
+        // ESC @ = initialize printer — safe no-op, just keeps BLE active
+        await printChar.writeValue(new Uint8Array([0x1B, 0x40]));
+        const dot = document.getElementById('ping-dot');
+        dot.style.opacity = '1';
+        setTimeout(() => dot.style.opacity = '0', 300);
+      } catch(e) {
+        console.warn('Keepalive failed, reconnecting...');
+        onDisconnected();
+      }
+    }, 5000);
   }
 
-  f.style.display = 'block';
-  f.style.opacity = '1';
-  f.style.transition = 'opacity 1s';
+  function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
 
-  setTimeout(() => { f.style.opacity = '0'; }, 100);
-  setTimeout(() => { f.style.display = 'none'; }, 1100);
-}
-// async function handlePrintJob(job) {
-//   const jobId = (job.header?.billNo || '') + '|' + (job.header?.date || '') + '|' + (job.items?.length || 0);
-// // if (jobId === lastJobId) return;
-// lastJobId = jobId;
-// flash();
-// renderPreview(job);
-// // localStorage.removeItem(STORAGE_KEY);
-// if (printChar) {
-// 	await printJob(job);
-// } else {
-// 	pendingJob = job;
-// 	setStatus('📋 Bill received! Connect printer to print.', 'idle');
-// }
-// }
-	async function handlePrintJob(job) {
-  try {
-    flash(); // now safe
+  // ── Job dedup & dispatch ──────────────────────────────────────────────────────
+  async function handlePrintJob(job) {
+    if (!job?.header || !job?.items) return;
 
-    console.log("PRINT JOB ARRIVED", job);
+    // Deduplicate — prevent double print from multiple listeners
+    const jobId = (job.header?.billNo||'') + '|' + (job.header?.date||'') + '|' + (job.items?.length||0);
+    if (jobId === lastJobId) return;
+    lastJobId = jobId;
 
+    localStorage.removeItem(STORAGE_KEY);
     renderPreview(job);
 
-    if (printChar) {
+    if (printChar && savedDevice?.gatt?.connected && !isPrinting) {
       await printJob(job);
+    } else if (savedDevice && !isReconnecting) {
+      // Try reconnect first
+      pendingJob = job;
+      setStatus('Reconnecting...', 'loading', true);
+      isReconnecting = true;
+      const ok = await connectToDevice(savedDevice);
+      isReconnecting = false;
+      if (ok) {
+        startKeepAlive();
+        await printJob(job);
+        pendingJob = null;
+      } else {
+        setStatus('📋 Bill ready. Connect printer.', 'idle');
+      }
     } else {
       pendingJob = job;
       setStatus('📋 Bill received! Connect printer to print.', 'idle');
     }
-
-  } catch (e) {
-    console.error("Print job error:", e);
   }
-}
-  // ── Method 1: postMessage from relay.html
- window.addEventListener('message', async (e) => {
-  if (!e.data || e.data.type !== 'PRINT_JOB') return;
 
-  console.log("Received print job:", e.data);
+  // ── Listeners ─────────────────────────────────────────────────────────────────
 
-  await handlePrintJob(e.data.payload);
-});
-  // ── Method 2: localStorage storage event
-//   window.addEventListener('storage', async (e) => {
-// 	if (e.key === STORAGE_KEY && e.newValue) {
-// 		try {
-// 			await handlePrintJob(JSON.parse(e.newValue));
-// 		} catch (err) {}
-// 	}
-// });
-  // ── Method 3: Polling every 800ms (most reliable on Android)
-//   setInterval(async () => {
-// 	const raw = localStorage.getItem(STORAGE_KEY);
-// 	if (!raw) return;
-// 	try {
-// 		await handlePrintJob(JSON.parse(raw));
-// 	} catch (e) {}
-// }, 800);
-  // ── On page load
+  // 1. postMessage from relay
+  window.addEventListener('message', async (e) => {
+    if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
+      await handlePrintJob(e.data.payload);
+    }
+  });
+
+  // 2. localStorage storage event (cross-tab)
+  window.addEventListener('storage', async (e) => {
+    if (e.key === STORAGE_KEY && e.newValue) {
+      try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
+    }
+  });
+
+  // 3. Polling fallback every 1s
+  setInterval(async () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
+  }, 1000);
+
+  // ── Page load ─────────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
-			const raw = new URLSearchParams(window.location.search).get('data');
-			if (raw) {
-				try {
-					pendingJob = JSON.parse(decodeURIComponent(raw));
-					renderPreview(pendingJob);
-					history.replaceState(null, '', window.location.pathname);
-				} catch (e) {}
-			}
-    // Clear stale job
-    // localStorage.removeItem(STORAGE_KEY); 
+    const raw = new URLSearchParams(window.location.search).get('data');
+    if (raw) {
+      try {
+        pendingJob = JSON.parse(decodeURIComponent(raw));
+        renderPreview(pendingJob);
+        history.replaceState(null, '', window.location.pathname);
+      } catch(e) {}
+    }
+    localStorage.removeItem(STORAGE_KEY);
     lastJobId = null;
   });
-  // ── Connect Bluetooth
-async function connectPrinter() {
-	try {
-		setStatus('Scanning...', 'loading', true);
-		document.getElementById('connectBtn').disabled = true;
-		const device = await navigator.bluetooth.requestDevice({
-			acceptAllDevices: true,
-			optionalServices: PROFILES.map(p => p.service)
-		});
-		setStatus('Connecting...', 'loading', true);
-		savedDevice = device;
-		device.addEventListener('gattserverdisconnected', onDisconnected);
-		const ok = await connectToDevice(device);
-		if (ok) {
-			setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
-			document.getElementById('connectBtn').disabled = false;
-			document.getElementById('forgetBtn').style.display = 'block';
-			if (pendingJob) {
-				await printJob(pendingJob);
-				pendingJob = null;
-			}
-		} else {
-			setStatus('❌ UUID not matched. Try again.', 'error');
-			document.getElementById('connectBtn').disabled = false;
-		}
-	} catch (e) {
-		setStatus('❌ ' + e.message, 'error');
-		document.getElementById('connectBtn').disabled = false;
-	}
-}
-  
-async function connectToDevice(device) {
-	try {
-		const server = await device.gatt.connect();
-		for (const p of PROFILES) {
-			try {
-				const svc = await server.getPrimaryService(p.service);
-				printChar = await svc.getCharacteristic(p.characteristic);
-				return true;
-			} catch (e) {}
-		}
-	} catch (e) {}
-	return false;
-}
-async function onDisconnected() {
-	printChar = null;
-	setStatus('Disconnected. Reconnecting...', 'loading', true);
-	for (let i = 0; i < 10; i++) {
-		await new Promise(r => setTimeout(r, 1500));
-		if (!savedDevice) break;
-		const ok = await connectToDevice(savedDevice);
-		if (ok) {
-			setStatus('✅ Reconnected: ' + (savedDevice.name || 'Printer'), 'success');
-			return;
-		}
-	}
-	setStatus('⚠️ Printer OFF or out of range. Tap Connect.', 'error');
-	document.getElementById('connectBtn').disabled = false;
-}
-  function forgetPrinter() {
-	if (savedDevice) try {
-		savedDevice.gatt.disconnect();
-	} catch (e) {}
-	printChar = savedDevice = null;
-	document.getElementById('forgetBtn').style.display = 'none';
-	setStatus('Forgotten. Connect again.', 'idle');
-}
- 
 
+  // ── Connect ───────────────────────────────────────────────────────────────────
+  async function connectPrinter() {
+    try {
+      setStatus('Scanning...', 'loading', true);
+      document.getElementById('connectBtn').disabled = true;
 
-  // ── Forget printer ──────────────────────────────────────────────────────────
-  function forgetPrinter() {
-    if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
-    printChar = savedDevice = null;
-    document.getElementById('printBtn').disabled = true;
-    document.getElementById('forgetBtn').style.display = 'none';
-    setStatus('Printer forgotten.', 'idle');
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: PROFILES.map(p => p.service)
+      });
+
+      setStatus('Connecting...', 'loading', true);
+      savedDevice = device;
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+
+      const ok = await connectToDevice(device);
+      if (ok) {
+        setStatus('✅ Connected: ' + (device.name || 'Printer') + ' — Ready!', 'success');
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('forgetBtn').style.display = 'block';
+        startKeepAlive();
+        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
+      } else {
+        setStatus('❌ UUID not matched. Try again.', 'error');
+        document.getElementById('connectBtn').disabled = false;
+      }
+    } catch(e) {
+      setStatus('❌ ' + e.message, 'error');
+      document.getElementById('connectBtn').disabled = false;
+    }
   }
 
-  // ── Render receipt preview ──────────────────────────────────────────────────
+  async function connectToDevice(device) {
+    try {
+      const server = await device.gatt.connect();
+      for (const p of PROFILES) {
+        try {
+          const svc = await server.getPrimaryService(p.service);
+          printChar  = await svc.getCharacteristic(p.characteristic);
+          return true;
+        } catch(e) {}
+      }
+    } catch(e) { console.warn('connectToDevice:', e.message); }
+    printChar = null;
+    return false;
+  }
+
+  async function onDisconnected() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    printChar = null;
+    stopKeepAlive();
+    setStatus('Disconnected. Reconnecting...', 'loading', true);
+
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      if (!savedDevice) break;
+      const ok = await connectToDevice(savedDevice);
+      if (ok) {
+        isReconnecting = false;
+        setStatus('✅ Reconnected!', 'success');
+        startKeepAlive();
+        if (pendingJob) { await printJob(pendingJob); pendingJob = null; }
+        return;
+      }
+    }
+    isReconnecting = false;
+    setStatus('⚠️ Could not reconnect. Tap Connect.', 'error');
+    document.getElementById('connectBtn').disabled = false;
+  }
+
+  function forgetPrinter() {
+    stopKeepAlive();
+    if (savedDevice) try { savedDevice.gatt.disconnect(); } catch(e) {}
+    printChar = savedDevice = null;
+    document.getElementById('forgetBtn').style.display = 'none';
+    setStatus('Forgotten. Connect again.', 'idle');
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────────
   function renderPreview(data) {
+    if (!data?.header || !data?.items) return;
     const { header, items } = data;
     let total = 0, rows = '';
     items.forEach((item, i) => {
       const t = item.qty * item.price; total += t;
-      rows += `<tr><td>${i+1}.</td><td>${item.name}</td><td>${item.qty}x</td>
-               <td align="center">${item.price}</td><td align="right"><b>${t}</b></td></tr>`;
+      rows += `<tr>
+        <td>${i+1}.</td><td>${item.name}</td>
+        <td>${item.qty}x</td>
+        <td align="center">${item.price}</td>
+        <td align="right"><b>${t}</b></td></tr>`;
     });
     document.getElementById('receiptPreview').innerHTML = `
-      <div style="text-align:center"><b style="font-size:14px">Jalaram Super Store</b><br>
-        Barwala(G)<br>9725792370<br>----------------------------</div>
+      <div style="text-align:center">
+        <b style="font-size:13px">Jalaram Super Store</b><br>
+        Barwala(G)<br>9725792370<br>----------------------------
+      </div>
       Bill : ${header.billNo}<br>Date : ${header.date}
       <hr style="margin:2px 0">
-      Customer : ${header.customerName}<br>Mobile : ${header.mobile}<br>Payment : ${header.paymentMethod}
+      Customer : ${header.customerName}<br>
+      Mobile   : ${header.mobile}<br>
+      Payment  : ${header.paymentMethod}
       <hr style="margin:2px 0">
       <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
       <hr style="margin:2px 0">
@@ -311,18 +549,25 @@ async function onDisconnected() {
       <div style="text-align:center">Thank You Visit Again</div>`;
   }
 
-  // ── Print ───────────────────────────────────────────────────────────────────
+  // ── Print ─────────────────────────────────────────────────────────────────────
   async function printJob(data) {
-	if (!printChar) return;
-	setStatus('Printing...', 'loading', true);
-	   
-	try {
-		await sendChunks(buildEscPos(data));
-		setStatus('✅ Printed! Ready for next bill.', 'success');
-	} catch (e) {
-		setStatus('❌ Print failed: ' + e.message, 'error');
-	}
-}
+    if (!printChar || isPrinting) return;
+    isPrinting = true;
+    stopKeepAlive(); // ✅ stop keepalive during print — no interference
+    setStatus('Printing...', 'loading', true);
+
+    try {
+      const escData = buildEscPos(data);
+      await sendChunks(escData);
+      setStatus('✅ Printed! Ready for next bill.', 'success');
+    } catch(e) {
+      setStatus('❌ Print failed: ' + e.message, 'error');
+      pendingJob = data; // save for retry
+    } finally {
+      isPrinting = false;
+      startKeepAlive(); // ✅ restart keepalive after print done
+    }
+  }
 function centerText(text, width) {
   text = String(text);
   if (text.length >= width) return text;
