@@ -323,7 +323,7 @@
 // 		setStatus('❌ Print failed: ' + e.message, 'error');
 // 	}
 // }
-	let printChar      = null;
+	 let printChar      = null;
   let savedDevice    = null;
   let pendingJob     = null;
   let lastJobId      = null;
@@ -331,34 +331,33 @@
   let isReconnecting = false;
   let keepAliveTimer = null;
 
-  const STORAGE_KEY = 'jalaram_print_job';
+  // MTU size your printer negotiated — we'll detect it after connect
+  let mtuSize = 20; // safe default, will be updated
 
+  const STORAGE_KEY = 'jalaram_print_job';
   const PROFILES = [
     { service:'000018f0-0000-1000-8000-00805f9b34fb', characteristic:'00002af1-0000-1000-8000-00805f9b34fb' },
     { service:'e7810a71-73ae-499d-8c15-faa9aef0c3f2', characteristic:'bef8d6c9-9c21-4c9e-b632-bd58c1009f9f' },
     { service:'49535343-fe7d-4ae5-8fa9-9fafd205e455', characteristic:'49535343-8841-43f4-a8d4-ecbe34729bb3' },
   ];
 
-  // ── Status ───────────────────────────────────────────────────────────────────
   function setStatus(msg, type='idle', spinner=false) {
     const b = document.getElementById('statusBox');
     b.className = 'status-box ' + type;
     b.innerHTML = (spinner ? '<span class="spinner"></span>' : '') + msg;
   }
 
-  // ── Keepalive: send ESC @ every 5s to prevent Android BLE suspend ────────────
+  // ── Keepalive ─────────────────────────────────────────────────────────────────
   function startKeepAlive() {
     stopKeepAlive();
     keepAliveTimer = setInterval(async () => {
       if (isPrinting || !printChar || !savedDevice?.gatt?.connected) return;
       try {
-        // ESC @ = initialize printer — safe no-op, just keeps BLE active
-        await printChar.writeValue(new Uint8Array([0x1B, 0x40]));
+        await printChar.writeValueWithoutResponse(new Uint8Array([0x1B, 0x40]));
         const dot = document.getElementById('ping-dot');
         dot.style.opacity = '1';
         setTimeout(() => dot.style.opacity = '0', 300);
       } catch(e) {
-        console.warn('Keepalive failed, reconnecting...');
         onDisconnected();
       }
     }, 5000);
@@ -368,11 +367,9 @@
     if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
   }
 
-  // ── Job dedup & dispatch ──────────────────────────────────────────────────────
+  // ── Job handler ───────────────────────────────────────────────────────────────
   async function handlePrintJob(job) {
     if (!job?.header || !job?.items) return;
-
-    // Deduplicate — prevent double print from multiple listeners
     const jobId = (job.header?.billNo||'') + '|' + (job.header?.date||'') + '|' + (job.items?.length||0);
     if (jobId === lastJobId) return;
     lastJobId = jobId;
@@ -383,57 +380,36 @@
     if (printChar && savedDevice?.gatt?.connected && !isPrinting) {
       await printJob(job);
     } else if (savedDevice && !isReconnecting) {
-      // Try reconnect first
       pendingJob = job;
       setStatus('Reconnecting...', 'loading', true);
       isReconnecting = true;
       const ok = await connectToDevice(savedDevice);
       isReconnecting = false;
-      if (ok) {
-        startKeepAlive();
-        await printJob(job);
-        pendingJob = null;
-      } else {
-        setStatus('📋 Bill ready. Connect printer.', 'idle');
-      }
+      if (ok) { startKeepAlive(); await printJob(job); pendingJob = null; }
+      else setStatus('📋 Bill ready. Connect printer.', 'idle');
     } else {
       pendingJob = job;
-      setStatus('📋 Bill received! Connect printer to print.', 'idle');
+      setStatus('📋 Bill received! Connect printer.', 'idle');
     }
   }
 
-  // ── Listeners ─────────────────────────────────────────────────────────────────
-
-  // 1. postMessage from relay
+  // 3 listeners for reliability
   window.addEventListener('message', async (e) => {
-    if (e.data?.type === 'PRINT_JOB' && e.data?.payload) {
-      await handlePrintJob(e.data.payload);
-    }
+    if (e.data?.type === 'PRINT_JOB' && e.data?.payload) await handlePrintJob(e.data.payload);
   });
-
-  // 2. localStorage storage event (cross-tab)
   window.addEventListener('storage', async (e) => {
-    if (e.key === STORAGE_KEY && e.newValue) {
-      try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
-    }
+    if (e.key === STORAGE_KEY && e.newValue) try { await handlePrintJob(JSON.parse(e.newValue)); } catch(err) {}
   });
-
-  // 3. Polling fallback every 1s
   setInterval(async () => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try { await handlePrintJob(JSON.parse(raw)); } catch(e) {}
   }, 1000);
 
-  // ── Page load ─────────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
     const raw = new URLSearchParams(window.location.search).get('data');
     if (raw) {
-      try {
-        pendingJob = JSON.parse(decodeURIComponent(raw));
-        renderPreview(pendingJob);
-        history.replaceState(null, '', window.location.pathname);
-      } catch(e) {}
+      try { pendingJob = JSON.parse(decodeURIComponent(raw)); renderPreview(pendingJob); history.replaceState(null,'',window.location.pathname); } catch(e) {}
     }
     localStorage.removeItem(STORAGE_KEY);
     lastJobId = null;
@@ -477,7 +453,12 @@
       for (const p of PROFILES) {
         try {
           const svc = await server.getPrimaryService(p.service);
-          printChar  = await svc.getCharacteristic(p.characteristic);
+          const ch  = await svc.getCharacteristic(p.characteristic);
+          printChar = ch;
+
+          // ✅ Detect MTU: try progressively larger writes to find max size
+          mtuSize = await detectMTU(ch);
+          console.log('Detected MTU:', mtuSize);
           return true;
         } catch(e) {}
       }
@@ -486,13 +467,29 @@
     return false;
   }
 
+  // ── MTU detection — find largest chunk printer accepts without error ──────────
+  async function detectMTU(characteristic) {
+    const sizes = [512, 256, 128, 64, 32, 20];
+    for (const size of sizes) {
+      try {
+        const testData = new Uint8Array(size).fill(0x00);
+        await characteristic.writeValueWithoutResponse(testData);
+        await new Promise(r => setTimeout(r, 50));
+        console.log('MTU ok:', size);
+        return size; // use this size
+      } catch(e) {
+        console.log('MTU too large:', size, '— trying smaller');
+      }
+    }
+    return 20; // absolute minimum fallback
+  }
+
   async function onDisconnected() {
     if (isReconnecting) return;
     isReconnecting = true;
     printChar = null;
     stopKeepAlive();
     setStatus('Disconnected. Reconnecting...', 'loading', true);
-
     for (let i = 0; i < 8; i++) {
       await new Promise(r => setTimeout(r, 2000));
       if (!savedDevice) break;
@@ -525,48 +522,50 @@
     let total = 0, rows = '';
     items.forEach((item, i) => {
       const t = item.qty * item.price; total += t;
-      rows += `<tr>
-        <td>${i+1}.</td><td>${item.name}</td>
-        <td>${item.qty}x</td>
-        <td align="center">${item.price}</td>
-        <td align="right"><b>${t}</b></td></tr>`;
+      rows += `<tr><td>${i+1}.</td><td>${item.name}</td><td>${item.qty}x</td>
+               <td align="center">${item.price}</td><td align="right"><b>${t}</b></td></tr>`;
     });
     document.getElementById('receiptPreview').innerHTML = `
-      <div style="text-align:center">
-        <b style="font-size:13px">Jalaram Super Store</b><br>
-        Barwala(G)<br>9725792370<br>----------------------------
-      </div>
-      Bill : ${header.billNo}<br>Date : ${header.date}
-      <hr style="margin:2px 0">
-      Customer : ${header.customerName}<br>
-      Mobile   : ${header.mobile}<br>
-      Payment  : ${header.paymentMethod}
+      <div style="text-align:center"><b style="font-size:13px">Jalaram Super Store</b><br>
+        Barwala(G)<br>9725792370<br>----------------------------</div>
+      Bill : ${header.billNo}<br>Date : ${header.date}<hr style="margin:2px 0">
+      Customer : ${header.customerName}<br>Mobile : ${header.mobile}<br>Payment : ${header.paymentMethod}
       <hr style="margin:2px 0">
       <table><tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>${rows}</table>
       <hr style="margin:2px 0">
       <div style="text-align:right"><b>Total ₹ ${total}</b></div>
-      <hr style="margin:2px 0">
-      <div style="text-align:center">Thank You Visit Again</div>`;
+      <hr style="margin:2px 0"><div style="text-align:center">Thank You Visit Again</div>`;
   }
 
   // ── Print ─────────────────────────────────────────────────────────────────────
   async function printJob(data) {
     if (!printChar || isPrinting) return;
     isPrinting = true;
-    stopKeepAlive(); // ✅ stop keepalive during print — no interference
+    stopKeepAlive();
     setStatus('Printing...', 'loading', true);
-
     try {
-      const escData = buildEscPos(data);
-      await sendChunks(escData);
+      await sendData(buildEscPos(data));
       setStatus('✅ Printed! Ready for next bill.', 'success');
     } catch(e) {
-      setStatus('❌ Print failed: ' + e.message, 'error');
-      pendingJob = data; // save for retry
+      setStatus('❌ ' + e.message, 'error');
+      pendingJob = data;
     } finally {
       isPrinting = false;
-      startKeepAlive(); // ✅ restart keepalive after print done
+      startKeepAlive();
     }
+  }
+
+  // ── Send all data using writeValueWithoutResponse in detected MTU chunks ──────
+  async function sendData(data) {
+    const CHUNK = mtuSize; // use detected MTU — no waiting for ACK = no timeout
+    for (let i = 0; i < data.length; i += CHUNK) {
+      if (!printChar) throw new Error('Disconnected mid-print');
+      await printChar.writeValueWithoutResponse(data.slice(i, i + CHUNK));
+      // Let the BLE stack breathe between chunks using microtask yield
+      await new Promise(r => setTimeout(r, 0));
+    }
+    // Wait after last chunk for printer to finish processing
+    await new Promise(r => setTimeout(r, 500));
   }
 function centerText(text, width) {
   text = String(text);
